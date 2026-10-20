@@ -1,7 +1,8 @@
 """Deterministic stub backends for tests. No GPU, no downloads, no model libraries.
 
 Every stub records the file IDs it was called with in ``calls`` and can be told to fail
-on chosen file IDs, raising ``PipelineError("STUB_FAILURE", detail=fail_detail)``.
+on chosen file IDs, raising ``PipelineError("STUB_FAILURE", detail=fail_detail)``, or to
+raise ``KeyboardInterrupt`` once for chosen file IDs.
 """
 
 from __future__ import annotations
@@ -38,13 +39,23 @@ class _Stub:
 
     model_version = STUB_VERSION
 
-    def __init__(self, fail_on: Collection[str] = (), fail_detail: str = "stub failure") -> None:
+    def __init__(
+        self,
+        fail_on: Collection[str] = (),
+        fail_detail: str = "stub failure",
+        interrupt_once: Collection[str] = (),
+    ) -> None:
         self.fail_on = frozenset(fail_on)
         self.fail_detail = fail_detail
+        self.interrupt_pending = set(interrupt_once)
+        """File IDs that raise ``KeyboardInterrupt`` on their first call (simulates Ctrl-C)."""
         self.calls: list[str] = []
 
     def _record(self, file_id: str) -> None:
         self.calls.append(file_id)
+        if file_id in self.interrupt_pending:
+            self.interrupt_pending.discard(file_id)
+            raise KeyboardInterrupt
         if file_id in self.fail_on:
             raise PipelineError(STUB_FAILURE, detail=self.fail_detail)
 

@@ -13,6 +13,9 @@ from murmurs.errors import SetupError
 from murmurs.runner import EXIT_SETUP_ERROR, run_job
 from murmurs.store import StoreError
 
+EXIT_INTERRUPTED = 130
+"""Conventional exit code for Ctrl-C; completed stages are kept for resume."""
+
 app = typer.Typer(
     name="murmurs",
     help="Turn interview audio into speaker-labeled transcripts with proposed redactions.",
@@ -145,6 +148,9 @@ def run(
         )
     except (SetupError, StoreError) as exc:
         _fail_setup(str(exc))
+    except KeyboardInterrupt:
+        typer.echo("interrupted; rerun the same command to resume", err=True)
+        raise typer.Exit(EXIT_INTERRUPTED) from None
     raise typer.Exit(summary.exit_code)
 
 
