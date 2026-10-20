@@ -173,6 +173,9 @@ One validated config per job, with CLI flags overriding its defaults; failed fil
 - Relative paths in the config (`input_dir`, `output_dir`, `prompt_path`) resolve against the current working directory, not the config file's location. They are made absolute (with `~` expanded) when the config is loaded, so the manifest and `--dry-run` record full paths.
 - Presets (e.g. names only) will be added after the first pipeline stage is implemented.
 - Batch behavior: if one file fails, skip it, report it, and continue. A rerun picks up from the last completed stage per file.
+- Job ID: the config file's name without its extension (`job.yaml` → `job`), overridable with `--job-id`. Rerunning the same config resumes the same job.
+- Input discovery: audio files are found recursively under `input_dir`, at any depth.
+- Duplicate inputs: files with identical contents share a file ID. The first by sorted path is processed; the others are reported as duplicates and do not count as failures.
 
 **Proposed schema**
 

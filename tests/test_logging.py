@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import StubJob
 from typer.testing import CliRunner
 
 from murmurs.backends import Waveform
@@ -132,8 +133,9 @@ def test_debug_unsafe_warns_and_writes_traceback_to_file_only(tmp_path: Path) ->
     assert SENTINEL not in console.getvalue()
 
 
-def test_cli_debug_unsafe_flag_prints_warning() -> None:
-    result = CliRunner().invoke(app, ["run", "--config", str(EXAMPLE), "--debug-unsafe"])
+def test_cli_debug_unsafe_flag_prints_warning(stub_job: StubJob) -> None:
+    result = CliRunner().invoke(app, ["run", "--config", str(stub_job()), "--debug-unsafe"])
+    assert result.exit_code == 0
     assert DEBUG_UNSAFE_WARNING in result.stderr
 
 

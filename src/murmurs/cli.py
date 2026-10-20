@@ -9,15 +9,18 @@ import yaml
 
 from murmurs import __version__
 from murmurs.config import ConfigError, JobConfig, parse_assignment, resolve_config
-from murmurs.logging import RunLogger
-
-EXIT_CONFIG_ERROR = 2
+from murmurs.errors import SetupError
+from murmurs.runner import EXIT_SETUP_ERROR, run_job
+from murmurs.store import StoreError
 
 app = typer.Typer(
     name="murmurs",
     help="Turn interview audio into speaker-labeled transcripts with proposed redactions.",
     no_args_is_help=True,
     add_completion=False,
+    # Rich tracebacks print exception messages and local variables, which can hold
+    # transcript text. Crashes are logged safely by murmurs.logging instead.
+    pretty_exceptions_enable=False,
 )
 
 config_app = typer.Typer(help="Inspect the job config format.", no_args_is_help=True)
@@ -93,6 +96,14 @@ def run(
             help="Write full tracebacks to the log file. They may contain transcript content.",
         ),
     ] = False,
+    job_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Job ID (output folder name). Defaults to the config file name; reuse it "
+            "to resume.",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Run a job. Precedence: schema defaults < config file < CLI flags.
 
@@ -124,14 +135,26 @@ def run(
     if dry_run:
         typer.echo(yaml.safe_dump(job.model_dump(mode="json"), sort_keys=False), nl=False)
         return
-    RunLogger(debug_unsafe=debug_unsafe)  # shows the --debug-unsafe warning; runner in P1-08
-    typer.echo("runner not implemented", err=True)
-    raise typer.Exit(1)
+
+    try:
+        summary = run_job(
+            job,
+            job_id or config.stem,
+            debug_unsafe=debug_unsafe,
+            install_crash_hook=True,
+        )
+    except (SetupError, StoreError) as exc:
+        _fail_setup(str(exc))
+    raise typer.Exit(summary.exit_code)
 
 
 def _fail_config(exc: ConfigError) -> NoReturn:
-    typer.echo(str(exc), err=True)
-    raise typer.Exit(EXIT_CONFIG_ERROR)
+    _fail_setup(str(exc))
+
+
+def _fail_setup(message: str) -> NoReturn:
+    typer.echo(message, err=True)
+    raise typer.Exit(EXIT_SETUP_ERROR)
 
 
 @config_app.command("schema")

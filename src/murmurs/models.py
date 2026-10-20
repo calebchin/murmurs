@@ -78,6 +78,19 @@ class ValidationResult(_Model):
         return self
 
 
+# --- Audio loading -----------------------------------------------------------------
+
+
+class AudioInfo(_Model):
+    """Stage 2 output: facts about the decoded waveform. The audio itself is never saved."""
+
+    schema_version: Literal[1] = 1
+    file_id: str
+    sample_rate: int = Field(gt=0)
+    n_samples: int = Field(ge=0)
+    duration_s: float = Field(ge=0)
+
+
 # --- Diarization and transcription ------------------------------------------------
 
 
@@ -268,14 +281,19 @@ class StageStatus(StrEnum):
 
 
 class FileStatus(_Model):
-    """Per-file progress through the pipeline."""
+    """Per-file progress through the pipeline.
 
-    schema_version: Literal[1] = 1
+    ``stage_hashes`` records the config hash each done stage ran with, so resume can
+    tell when a stage's config has changed. (Schema 2 added ``stage_hashes``.)
+    """
+
+    schema_version: Literal[2] = 2
     file_id: str
     input_hash: str
     stages: dict[Stage, StageStatus] = Field(
         default_factory=lambda: dict.fromkeys(Stage, StageStatus.PENDING)
     )
+    stage_hashes: dict[Stage, str] = {}
     failed_stage: Stage | None = None
     error: ErrorInfo | None = None
 
@@ -310,6 +328,7 @@ class RunManifest(_Model):
 
 TOP_LEVEL_ARTIFACTS: tuple[type[BaseModel], ...] = (
     ValidationResult,
+    AudioInfo,
     Diarization,
     Transcript,
     RedactionLayer,

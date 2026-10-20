@@ -22,5 +22,9 @@ class PipelineError(Exception):
         super().__init__(code)
 
 
-class BackendSetupError(Exception):
+class SetupError(Exception):
+    """The job cannot start (bad inputs, config or backends). Maps to exit code 2."""
+
+
+class BackendSetupError(SetupError):
     """A backend could not be chosen or loaded; the job cannot start."""

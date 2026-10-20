@@ -9,6 +9,7 @@ from pydantic import BaseModel, ValidationError
 from murmurs.config import Stage, load_config
 from murmurs.models import (
     TOP_LEVEL_ARTIFACTS,
+    AudioInfo,
     AuditAction,
     AuditEvent,
     DetectorSource,
@@ -83,6 +84,7 @@ def _examples() -> list[BaseModel]:
         ValidationResult(
             file_id="f2", path="in/b.wav", valid=False, error=ErrorInfo(code="UNREADABLE")
         ),
+        AudioInfo(file_id="f1", sample_rate=16000, n_samples=32000, duration_s=2.0),
         Diarization(file_id="f1", turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=1.0)]),
         _transcript(),
         RedactionLayer(
@@ -129,7 +131,8 @@ def test_examples_cover_every_top_level_artifact() -> None:
 
 @pytest.mark.parametrize("model", TOP_LEVEL_ARTIFACTS, ids=lambda m: m.__name__)
 def test_top_level_artifacts_carry_schema_version(model: type[BaseModel]) -> None:
-    assert model.model_fields["schema_version"].default == 1
+    expected = 2 if model is FileStatus else 1
+    assert model.model_fields["schema_version"].default == expected
 
 
 def test_json_schemas_export_for_all_artifacts() -> None:

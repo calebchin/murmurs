@@ -90,10 +90,10 @@ def test_malformed_set_fails() -> None:
     assert "key.path=value" in result.stderr
 
 
-def test_run_without_dry_run_reports_runner_missing() -> None:
-    result = _run()
-    assert result.exit_code == 1
-    assert "runner not implemented" in result.stderr
+def test_run_with_missing_input_dir_exits_2() -> None:
+    result = _run()  # the example config's input_dir does not exist
+    assert result.exit_code == 2
+    assert "not a directory" in result.stderr
 
 
 @pytest.mark.parametrize(
