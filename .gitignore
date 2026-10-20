@@ -218,3 +218,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- murmurs ---
+# Pipeline outputs
+outputs/
+output/
+runs/
+
+# Audio (never commit interview data; test fixtures are generated)
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.ogg
+*.aac
+*.wma
+*.opus
+
+# Claude Code local settings (keep .claude/CLAUDE.md tracked)
+.claude/settings.local.json

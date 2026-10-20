@@ -1,0 +1,46 @@
+[project]
+name = "murmurs"
+version = "0.1.0"
+description = "Local pipeline that turns interview audio into speaker-labeled transcripts with proposed deidentification redactions"
+readme = "README.md"
+authors = [
+    { name = "Caleb Chin", email = "caleb.timothy.chin@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+]
+
+[project.scripts]
+murmurs = "murmurs.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.13.3,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+include = ["src/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not gpu'"
+markers = [
+    "gpu: loads real models; needs a GPU and model weights (run with -m gpu)",
+]
