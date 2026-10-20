@@ -26,6 +26,7 @@ from murmurs.logging import (
     RunLogger,
     install_excepthook,
 )
+from murmurs.manifest import finish_manifest, sample_job_id, select_sample, start_manifest
 from murmurs.models import ErrorInfo, FileStatus, StageStatus, TranscriptMode
 from murmurs.stages import (
     DEPENDS,
@@ -197,10 +198,20 @@ def run_job(
     Raises ``SetupError`` (or ``StoreError`` for an unsafe output location) if the job
     cannot start; those map to exit code 2. Per-file failures are reported in the
     summary instead. ``KeyboardInterrupt`` stops the job; completed stages are kept.
+
+    A sample run (``sample.enabled``) processes ``sample.n_files`` files chosen with
+    ``sample.seed`` and writes to ``<job_id>-sample``.
     """
     modes = parse_modes(config)
+    if config.sample.enabled:
+        job_id = sample_job_id(job_id)
     store = ArtifactStore(config.data.output_dir, config.data.input_dir, job_id)
     discovery = discover_inputs(config.data.input_dir, config.data.audio_extensions)
+    files = discovery.files
+    if config.sample.enabled:
+        files = select_sample(
+            files, [f.file_id for f in files], config.sample.n_files, config.sample.seed
+        )
     logger = RunLogger(log_dir=store.job_dir / "logs", console=console, debug_unsafe=debug_unsafe)
     if install_crash_hook:
         install_excepthook(logger)
@@ -218,21 +229,32 @@ def run_job(
     logger.info(
         "job_start",
         job_id=job_id,
-        n_files=len(discovery.files),
+        n_files=len(files),
         count=len(discovery.duplicates),
     )
 
+    manifest = start_manifest(
+        job_id,
+        config,
+        model_versions=_model_versions(backends),
+        input_hashes={f.file_id: f.content_hash for f in files},
+    )
+    store.write_manifest(manifest)
     metrics = MetricsRecorder(job_id)
     hashes = stage_hashes(config)
+    completed = False
     try:
-        for file in discovery.files:
+        for file in files:
             outcome = _run_file(
                 file, config, store, backends, modes, stages, hashes, logger, progress, metrics,
                 summary,
             )  # fmt: skip
             progress.on_file_done(file.file_id, outcome)
+        completed = True
     finally:
         metrics.write(store.job_dir / "metrics.json")
+        statuses = [s for f in files if (s := store.read_status(f.file_id)) is not None]
+        store.write_manifest(finish_manifest(manifest, statuses, completed))
 
     for failure in summary.failed:
         logger.error(
@@ -250,6 +272,17 @@ def run_job(
         count=len(summary.duplicates),
     )
     return summary
+
+
+def _model_versions(backends: Backends) -> dict[str, str]:
+    """Model version reported by each backend the job created."""
+    created = {
+        "audio_loader": backends.audio_loader,
+        "diarizer": backends.diarizer,
+        "transcriber": backends.transcriber,
+        "ner": backends.ner,
+    }
+    return {kind: b.model_version for kind, b in created.items() if b is not None}
 
 
 def _run_file(
