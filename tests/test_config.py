@@ -163,3 +163,27 @@ def test_config_schema_command_prints_json_schema() -> None:
     schema = json.loads(result.output)
     assert schema["title"] == "JobConfig"
     assert set(schema["required"]) == {"data", "deid"}
+
+
+def test_relative_paths_resolve_against_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _example_raw()
+    raw["data"] = {"input_dir": "audio", "output_dir": "../out"}
+    raw["deid"]["prompt_path"] = "prompts/deid.txt"
+    config_path = _write(tmp_path, raw)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    config = load_config(config_path)
+    assert config.data.input_dir == workdir / "audio"
+    assert config.data.output_dir == workdir / ".." / "out"
+    assert config.deid.prompt_path == workdir / "prompts" / "deid.txt"
+
+
+def test_home_directory_is_expanded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    raw = _example_raw()
+    raw["data"]["input_dir"] = "~/audio"
+    assert load_config(_write(tmp_path, raw)).data.input_dir == tmp_path / "audio"

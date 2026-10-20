@@ -55,6 +55,7 @@ All processing is local, the deidentification standard comes from the data owner
 - **Data lifecycle:** original audio is retained; deleting it is the user's decision. No intermediate audio files are written; any temporary files are deleted after processing.
 - **Access:** no access restrictions on output files for now, since everything runs locally.
 - **Logging:** logs, errors and crash reports must never contain transcript text or LLM prompt contents.
+- **Input file names:** input audio file names and paths contain no PHI, so artifacts and the manifest may record them.
 - **Audit trail:** every redaction decision records who made it, when, and what changed.
 
 ## User workflows
@@ -169,6 +170,7 @@ The NER labels are mapped to the project's tag set in config. Some labels, such 
 One validated config per job, with CLI flags overriding its defaults; failed files are skipped and reported, and jobs are resumable.
 
 - Config is defined with pydantic and versioned so older configs keep working.
+- Relative paths in the config (`input_dir`, `output_dir`, `prompt_path`) resolve against the current working directory, not the config file's location. They are made absolute (with `~` expanded) when the config is loaded, so the manifest and `--dry-run` record full paths.
 - Presets (e.g. names only) will be added after the first pipeline stage is implemented.
 - Batch behavior: if one file fails, skip it, report it, and continue. A rerun picks up from the last completed stage per file.
 

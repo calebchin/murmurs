@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 CURRENT_SCHEMA_VERSION = 2
 """Newest config schema version this code reads. Older versions are migrated on load."""
@@ -72,12 +79,22 @@ class EntityAction(StrEnum):
     IGNORE = "ignore"
 
 
+def _absolute(path: Path) -> Path:
+    """Expand ``~`` and make a path absolute against the current working directory."""
+    return path.expanduser().absolute()
+
+
 class DataConfig(_Model):
-    """Input and output locations."""
+    """Input and output locations. Relative paths resolve against the current directory."""
 
     input_dir: Path
     output_dir: Path
     audio_extensions: list[str] = [".wav", ".m4a"]
+
+    @field_validator("input_dir", "output_dir")
+    @classmethod
+    def _make_absolute(cls, path: Path) -> Path:
+        return _absolute(path)
 
 
 class SampleConfig(_Model):
@@ -142,6 +159,11 @@ class DeidConfig(_Model):
     prompt_path: Path | None = None
     redaction_threshold: float = Field(0.5, ge=0, le=1)
     flag_edge_cases: bool = True
+
+    @field_validator("prompt_path")
+    @classmethod
+    def _make_absolute(cls, path: Path | None) -> Path | None:
+        return None if path is None else _absolute(path)
 
 
 class ComputeConfig(_Model):
