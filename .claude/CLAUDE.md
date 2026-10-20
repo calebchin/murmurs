@@ -42,7 +42,7 @@ Before finishing any task, run `uv run ruff check .`, `uv run ruff format --chec
 - Each model (STT, diarization, NER, LLM) sits behind a `Protocol` in `murmurs.backends`. Pipeline code depends only on the protocol, never on a model library directly.
 - Every backend has a stub implementation used by tests. Stubs are deterministic and need no GPU or downloads.
 - Stages read and write artifacts through the artifact store, never through ad hoc paths.
-- All file writes are atomic (write to a temp file in the same directory, then rename).
+- All file writes are atomic (write to a temp file in the same directory, then rename). Exception: append-only log files are written line by line, not atomically.
 - Type hints on all public functions. Docstrings on public classes and functions.
 - Config file format is YAML.
 

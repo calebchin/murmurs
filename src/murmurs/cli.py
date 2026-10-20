@@ -9,6 +9,7 @@ import yaml
 
 from murmurs import __version__
 from murmurs.config import ConfigError, JobConfig, parse_assignment, resolve_config
+from murmurs.logging import RunLogger
 
 EXIT_CONFIG_ERROR = 2
 
@@ -85,6 +86,13 @@ def run(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Print the resolved config and exit.")
     ] = False,
+    debug_unsafe: Annotated[
+        bool,
+        typer.Option(
+            "--debug-unsafe",
+            help="Write full tracebacks to the log file. They may contain transcript content.",
+        ),
+    ] = False,
 ) -> None:
     """Run a job. Precedence: schema defaults < config file < CLI flags.
 
@@ -116,6 +124,7 @@ def run(
     if dry_run:
         typer.echo(yaml.safe_dump(job.model_dump(mode="json"), sort_keys=False), nl=False)
         return
+    RunLogger(debug_unsafe=debug_unsafe)  # shows the --debug-unsafe warning; runner in P1-08
     typer.echo("runner not implemented", err=True)
     raise typer.Exit(1)
 
