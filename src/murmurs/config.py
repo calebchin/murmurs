@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -213,6 +214,76 @@ def load_config(path: Path) -> JobConfig:
     Raises ``ConfigError`` if the file is missing, is not valid YAML, is not a mapping,
     or fails validation.
     """
+    return validate_config(read_config_file(path))
+
+
+def resolve_config(path: Path, overrides: list[tuple[str, Any]]) -> JobConfig:
+    """Load a YAML job config, apply overrides in order, and validate the result.
+
+    Precedence is schema defaults < config file < overrides. Each override is a dotted
+    field path and a value, e.g. ``("stages.end", "transcribe")``.
+    """
+    raw = read_config_file(path)
+    for key, value in overrides:
+        raw = apply_override(raw, key, value)
+    return validate_config(raw)
+
+
+def parse_assignment(text: str) -> tuple[str, Any]:
+    """Parse a ``key.path=value`` override.
+
+    The value is read as a YAML scalar, so ``2`` is an int, ``0.5`` a float,
+    ``true`` a bool, ``null`` None and ``[a, b]`` a list. Quote a value to force a
+    string, e.g. ``transcription.model="1.0"``.
+    """
+    key, sep, value_text = text.partition("=")
+    key = key.strip()
+    if not sep or not key:
+        raise ConfigError(["--set: expected key.path=value"])
+    try:
+        value = yaml.safe_load(value_text) if value_text.strip() else ""
+    except yaml.YAMLError:
+        raise ConfigError([f"{key}: value is not valid YAML"]) from None
+    return key, value
+
+
+def apply_override(raw: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
+    """Return a copy of ``raw`` with the dotted ``key`` set to ``value``.
+
+    Missing intermediate sections are created; numeric parts index into existing lists
+    (e.g. ``deid.entity_types.0.action``). Unknown field names are caught later by
+    validation.
+    """
+    parts = key.split(".")
+    if any(not part for part in parts):
+        raise ConfigError([f"{key}: invalid field path"])
+    result = copy.deepcopy(raw)
+    node: Any = result
+    for i, part in enumerate(parts):
+        last = i == len(parts) - 1
+        where = ".".join(parts[: i + 1])
+        if isinstance(node, list):
+            if not part.isdigit() or int(part) >= len(node):
+                raise ConfigError([f"{where}: no such list item"])
+            if last:
+                node[int(part)] = value
+            else:
+                node = node[int(part)]
+        elif isinstance(node, dict):
+            if last:
+                node[part] = value
+            else:
+                node = node.setdefault(part, {})
+        else:
+            raise ConfigError([f"{'.'.join(parts[:i])}: is not a section, cannot set {key}"])
+    return result
+
+
+def read_config_file(path: Path) -> dict[str, Any]:
+    """Read a YAML config file into a raw mapping, without validating it.
+
+    Raises ``ConfigError`` if the file is missing, is not valid YAML, or is not a mapping.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -225,4 +296,4 @@ def load_config(path: Path) -> JobConfig:
         raise ConfigError([f"(file): invalid YAML{where}"]) from None
     if not isinstance(raw, dict):
         raise ConfigError(["(root): config must be a YAML mapping"])
-    return validate_config(raw)
+    return raw
