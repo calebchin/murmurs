@@ -1,6 +1,6 @@
 # Murmurs — Audio Interview to Cleaned Transcript Design Doc
 
-Last updated: Oct 19, 2026
+Last updated: Oct 20, 2026
 
 ## Summary and motivation
 
@@ -94,10 +94,10 @@ The pipeline has seven stages with defined inputs and outputs, so any range of s
 | # | Stage | Input | Output | Method |
 | --- | --- | --- | --- | --- |
 | 1 | Ingest and validate | Raw .wav or .m4a files | Validation metadata (JSON) | Format, sample rate, corruption and duration checks |
-| 2 | Audio loading | Original audio file | In-memory 16 kHz mono waveform | Decode once and resample in memory; the original file and format are untouched, and no converted file is written |
+| 2 | Audio loading | Original audio file | In-memory 16 kHz mono waveform | Decode once with torchcodec (system ffmpeg) and resample in memory; the original file and format are untouched, and no converted file is written |
 | 3 | Diarization | Waveform | Speaker turns (JSON) | Pyannote 3.1 on the full recording |
 | 4 | Transcription | Waveform | Verbatim and intended transcripts with word-level timestamps | CrisperWhisper 2.0 `transcribe_dual`, which handles long audio itself with no stitching needed |
-| 5 | Speaker assignment | Word timestamps + speaker turns | Full speaker-labeled transcript | Assign each word to the overlapping speaker turn; optional LLM pass to fix diarization mistakes |
+| 5 | Speaker assignment | Word timestamps + speaker turns | Full speaker-labeled transcript | Assign each word to the speaker turn it overlaps most; a word in a gap goes to the nearest turn within `speaker_gap_tolerance_s`, else `UNKNOWN`; optional LLM pass to fix diarization mistakes |
 | 6 | PHI detection | Full transcript | Annotated transcript for review + clean version (PHI above a set threshold redacted) | NER model + LLM ensemble |
 | 7 | Human review | Annotated transcript | Clean, reviewed transcript | Review UI |
 
@@ -105,8 +105,8 @@ Regex-based detection is not used, since the expected identifiers do not follow 
 
 **Constraints from the chosen models**
 
-- **CrisperWhisper 2.0:** `transcribe` accepts a file path or a numpy array with a sample rate. Word timestamps come at no extra cost, so audio-synced review later needs no separate alignment step.
-- **CrisperWhisper backends:** the fast `ct2` backend (about 4–5x faster, and required for `transcribe_dual`) has wheels for Linux x86_64 only. macOS and Windows use the slower `transformers` backend and need two passes for verbatim and intended.
+- **CrisperWhisper 2.0:** `transcribe` accepts a file path or a numpy array with a sample rate. We always pass the in-memory numpy array, never a path, so every input format goes through our one loader. Word timestamps come at no extra cost, so audio-synced review later needs no separate alignment step.
+- **CrisperWhisper backends:** the fast `ct2` backend (about 4–5x faster, and required for `transcribe_dual`) has wheels for Linux x86_64 only. macOS and Windows would need the slower `transformers` backend, with two passes for verbatim and intended; that backend is deferred, and only `ct2` is supported for now.
 - **CrisperWhisper threading:** the `ct2` model must be loaded and run on one dedicated thread, so parallel transcription means separate processes, not threads.
 - **CrisperWhisper license:** inference code is MIT, but the standard model weights are under a non-commercial research license.
 - **Hotword boosting** for names and rare terms is available only in the commercial Pro models.
@@ -216,12 +216,13 @@ class StagesConfig(BaseModel):
 class DiarizationConfig(BaseModel):
     model: str = "pyannote/speaker-diarization-3.1"
     num_speakers: int | None = None      # None = let the model estimate
+    speaker_gap_tolerance_s: float = Field(0.5, ge=0)  # max gap to nearest turn, else UNKNOWN
     llm_correction: bool = True
 
 
 class TranscriptionConfig(BaseModel):
     model: str = "nyralabs/CrisperWhisper2.0_large"
-    backend: str = "auto"                # "auto" | "ct2" | "transformers"
+    backend: str = "auto"                # "auto" | "ct2" | "transformers" (not supported yet)
     language: str = "en"
     modes: list[str] = ["verbatim", "intended"]
     word_timestamps: bool = True
@@ -251,7 +252,7 @@ class ComputeConfig(BaseModel):
 
 
 class JobConfig(BaseModel):
-    schema_version: int = 1
+    schema_version: int = 2              # 2 added diarization.speaker_gap_tolerance_s
     data: DataConfig
     sample: SampleConfig = SampleConfig()
     stages: StagesConfig = StagesConfig()
@@ -261,7 +262,7 @@ class JobConfig(BaseModel):
     compute: ComputeConfig = ComputeConfig()
 ```
 
-`parallel_workers` counts processes because the CrisperWhisper `ct2` model must stay on one thread. `ner_labels` and `action` on each entity type carry the NER label mapping described under Deidentification design.
+`parallel_workers` counts processes because the CrisperWhisper `ct2` model must stay on one thread. `ner_labels` and `action` on each entity type carry the NER label mapping described under Deidentification design. Input audio has no minimum or maximum duration; 15 minutes to 1 hour is the typical range, not a validation rule.
 
 ## Evaluation and testing
 
@@ -281,7 +282,7 @@ The tool picks open-source models that fit available GPU memory, parallelizes wh
 - **Resources:** a set of open-source models sized to available GPU memory, with CPU as a last-resort fallback.
 - **Parallelism:** transcription and deidentification run in parallel when memory allows.
 - **Observability:** per-stage progress reporting, PHI-free structured logs, and timing metrics.
-- **Packaging:** uv as the package manager.
+- **Packaging:** uv as the package manager. Audio decoding uses torchcodec, which needs a system ffmpeg install.
 - **Extensibility:** STT, diarization, NER and LLM backends sit behind interfaces so they can be swapped without touching pipeline code.
 - **Output formats:** plain text for transcripts; JSON for metadata and other artifacts.
 
@@ -339,10 +340,11 @@ Testing uses example audio provided by the project owner, since the pipeline mus
 - Liability and sign-off enforcement
 - Presets
 - SRT/VTT and other audio-linked output formats
+- CrisperWhisper `transformers` backend for macOS and Windows
 
 ## Open questions
 
 - [ ] How confidence scoring evolves beyond detector agreement
-- [ ] Confirm CrisperWhisper decodes .m4a from a file path. If not, our loader decodes it and passes a numpy array; either way no converted file is written.
+- [x] Confirm CrisperWhisper decodes .m4a from a file path. **Resolved (Oct 20, 2026):** moot. Our loader always decodes with torchcodec and passes a numpy array to every backend, so CrisperWhisper never sees a file path.
 - [ ] Target hardware: GPT-OSS 120B needs roughly one 80 GB GPU; is a smaller fallback model needed for other machines?
 - [ ] Which NER labels are redacted, flagged or ignored for CECA and LEDS interviews

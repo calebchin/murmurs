@@ -1,0 +1,56 @@
+# Example murmurs job config. Every field is shown; omitted fields take the defaults
+# listed here. Print the full schema with: uv run murmurs config schema
+schema_version: 2
+
+data:
+  input_dir: /path/to/interview/audio
+  output_dir: /path/to/murmurs/output   # must not be inside input_dir
+  audio_extensions: [".wav", ".m4a"]
+
+sample:
+  enabled: false        # true = run on a few files for human quality review
+  n_files: 5
+  seed: 0               # same seed and inputs always pick the same files
+
+stages:
+  start: ingest         # ingest | load_audio | diarize | transcribe | assign_speakers | detect_phi
+  end: detect_phi
+  resume: true
+
+diarization:
+  model: pyannote/speaker-diarization-3.1
+  num_speakers: null    # null = let the model estimate
+  speaker_gap_tolerance_s: 0.5   # words in a gap up to this far from a turn take its speaker
+  llm_correction: true
+
+transcription:
+  model: nyralabs/CrisperWhisper2.0_large
+  backend: auto         # auto | ct2 (transformers is not supported yet)
+  language: en
+  modes: [verbatim, intended]
+  word_timestamps: true
+
+deid:
+  ner_model: OpenMed/privacy-filter-nemotron-v2
+  llm_model: openai/gpt-oss-120b
+  prompt_path: null
+  redaction_threshold: 0.5
+  flag_edge_cases: true
+  # Illustrative only. Which NER labels map to which entity type, and whether each is
+  # redacted, flagged or ignored, is an open question in docs/design.md.
+  entity_types:
+    - name: PERSON
+      tag: "[PERSON_{n}]"
+      description: Names of people, including first names, nicknames and partial names.
+      ner_labels: [first_name, last_name]
+      action: redact
+    - name: LOCATION
+      tag: "[LOCATION_{n}]"
+      description: Cities, towns, streets, addresses and other named places.
+      ner_labels: [city, street_address]
+      action: redact
+
+compute:
+  device: auto          # auto | cuda | cpu
+  max_gpu_memory_gb: null
+  parallel_workers: 1   # worker processes, not threads
