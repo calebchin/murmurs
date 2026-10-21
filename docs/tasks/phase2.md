@@ -6,6 +6,8 @@ This phase replaces the stub stages from phase 1 with real logic for stages 1–
 
 Every real backend keeps its stub from P1-06. Default tests use stubs and tiny fixtures; tests that load real models are marked `@pytest.mark.gpu`. The example audio from the project owner is never committed: GPU tests read it from the directory in the `MURMURS_EXAMPLE_AUDIO_DIR` environment variable and skip if it is unset.
 
+The pipeline must run on a machine with no network connection (D11). Every real backend loads its weights from the local cache only, and declares what it needs so `murmurs models download` can fetch it ahead of time (P2-00).
+
 ---
 
 ## Decisions
@@ -21,16 +23,45 @@ The design doc was silent or had an open question on each item below. Tasks that
 | D3 | **Ingest duration limits.** | No duration limits. 15 min to 1 hour is an approximate guide, not a validation rule. Ingest still rejects empty (zero-duration) files. | P2-01 |
 | D4 | **Non-Linux transcription backend.** | Out of scope for this phase. `backend: transformers` fails at setup (exit code 2) with "not supported yet", and so does `backend: auto` on a platform where `ct2` is unavailable. Added to "Deferred to later versions" in the design doc. | P2-04 |
 | D5 | **Words with no overlapping speaker turn.** | Nearest turn if the gap is within a tolerance, otherwise speaker `UNKNOWN`. The tolerance is a new config field, `diarization.speaker_gap_tolerance_s` (default 0.5 s), and `JobConfig.schema_version` goes to 2. | P2-05, config |
+| D11 | **Offline operation.** | The first deployment machine (the current dev machine) runs disconnected. Weights are downloaded on it while connected, then it goes offline. Runs force Hugging Face offline mode, never read `HF_TOKEN`, and fail at setup (exit code 2) if a required model is not cached. `HF_TOKEN` is used only by `murmurs models download`. Recorded in `docs/design.md` → Operations and packaging. | P2-00, P2-03, P2-04, P2-06, P2-10 |
+| D12 | **Stub test inputs once the real audio loader exists.** | The `stub_job` fixture in `tests/conftest.py` writes real tone audio (`tests/fixtures/audio.py`) instead of fake bytes, so tests that use the `"default"` audio loader run the real torchcodec loader on CPU. | P2-02 |
 
 ### Open
 
 | ID | Question | Blocks |
 | --- | --- | --- |
-| D6 | **How GPT-OSS 120B is served.** In-process (e.g. `transformers`, `vllm` offline mode) or a local server (vLLM, llama.cpp) on `localhost`? Hard rule 4 forbids network calls with interview data; does a loopback-only connection count? Also tied to the design open question on target hardware and a smaller fallback model. | P2-06, P2-07 |
+| D6 | **How GPT-OSS 120B is served.** In-process (e.g. `transformers`, `vllm` offline mode) or a local server (vLLM, llama.cpp) on `localhost`? Hard rule 4 forbids network calls with interview data; does a loopback-only connection count? Also tied to the design open question on target hardware and a smaller fallback model. Constraint from D11: whichever option is chosen must start and run with no network connection, including any tokenizer vocabulary it fetches on first use. | P2-06, P2-07 |
 | D7 | **Default for `diarization.llm_correction`.** The schema defaults it to `true`, so a default phase 2 run needs GPT-OSS 120B loaded. Keep that default, or default to `false` until the LLM is set up? | P2-07 |
 | D8 | **Evaluation set form and authorship.** Text transcripts only, or also synthetic audio (e.g. TTS) to test the full pipeline? Who writes the interviews: the project owner, an LLM run locally, or both? How many CECA and LEDS interviews make the set "complete"? | P2-09 |
 | D9 | **What ground-truth offsets point into.** Redaction spans use character offsets, but the design does not define which text: the intended or verbatim transcript, and which plain-text rendering (with or without speaker labels and timestamps). Phase 3 will use the same answer. | P2-08, P2-09 |
 | D10 | **Evaluation tag set.** The data owners set the deidentification standard. Which entity types (and NER label mappings) do ground-truth labels use? Related to the design open question on NER label actions. | P2-09 |
+
+---
+
+## P2-00: Offline setup
+
+**Goal:** every later task can rely on runs never touching the network, and on one command that fetches all model weights while the machine is still connected.
+
+**Depends on:** D11 (resolved).
+
+**Scope**
+- Forced offline mode: a library function (e.g. `murmurs.offline.enforce_offline()`) that sets `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1` and `HF_DATASETS_OFFLINE=1`. The runner calls it before creating any backend. `huggingface_hub` reads these variables when it is imported, so real backends must import model libraries inside their factory or constructor, never at module import time of `murmurs.backends.registry`. Add a test that importing `murmurs` and its registry does not import `huggingface_hub`, `transformers`, `pyannote` or `crisperwhisper`.
+- Weight declarations: each registry entry can declare the weights it needs as a list of `WeightSpec` (Hugging Face repo ID, optional revision, optional file patterns), given the job config. Stubs declare none. Real backends add theirs in P2-03, P2-04 and P2-06 (and the NER backend in phase 3). This is registry metadata, not a change to the backend protocols.
+- `murmurs models download --config job.yaml`: downloads every declared weight for the backends the config selects (all stages, regardless of `stages.start`/`end`) into the standard Hugging Face cache. Reads `HF_TOKEN` for gated models; never logs or echoes it. Prints repo IDs and sizes only.
+- `murmurs models check --config job.yaml`: reports, per declared weight, whether it is fully cached, without network access. Exit code 0 if all are present, 2 otherwise.
+- Runner setup check: before any file is processed, verify the declared weights for the job's stage range are cached; if not, exit code 2 with a message naming the missing repo IDs and suggesting `murmurs models download`.
+- Record each model's cached revision (commit hash) in the run manifest's `model_versions`.
+- Network guard for default tests: an autouse fixture in `tests/conftest.py` that makes any socket connection other than `AF_UNIX` raise. No new dependency. Add a line to `.claude/CLAUDE.md` → Testing saying default tests run with the network blocked.
+- New direct dependency: `huggingface_hub` (already a transitive dependency of pyannote and transformers; used here for downloads and cache inspection).
+
+**Out of scope:** the real backends themselves (P2-02 onward), copying caches between machines (not needed per D11).
+
+**Acceptance criteria**
+- After `enforce_offline()`, the Hugging Face offline variables are set, and a test confirms the runner calls it before backend creation.
+- Importing `murmurs.backends.registry` does not import any model library.
+- With a stub registry entry that declares a fake repo, `murmurs models check` and a job run both exit 2 and name the repo; with the repo present in a temporary `HF_HOME` cache, both succeed. No network access is needed for either.
+- `murmurs models download` with a dummy `HF_TOKEN` (download call mocked) never writes the token value to logs or console.
+- A default test that tries to open a TCP socket fails with the network guard's error.
 
 ---
 
@@ -71,6 +102,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 - The waveform is not an artifact. The stage writes a small metadata artifact (sample count, duration, sample rate, input hash) so the runner can record completion.
 - The runner keeps the waveform in memory for that file's remaining stages and frees it after the file's last audio stage. On resume, if a later stage needs audio and the waveform is not in memory, it is decoded again.
 - Peak memory note in the summary: roughly 230 MB per hour of audio at 16 kHz float32.
+- Test inputs (D12): change the `stub_job` fixture in `tests/conftest.py` to write short tone files with `tests/fixtures/audio.py` instead of fake bytes, since the `"default"` audio loader now decodes real audio. Tests that pass inputs explicitly with fake bytes and rely on the default loader move to tone files too; tests that inject `StubAudioLoader` directly may keep fake bytes.
 
 **Out of scope:** chunking audio (CrisperWhisper and pyannote take the full recording).
 
@@ -89,7 +121,8 @@ The design doc was silent or had an open question on each item below. Tasks that
 **Scope** (in `murmurs.backends`)
 - `PyannoteDiarizer` implementing `Diarizer`, loading `diarization.model`.
 - Pass the in-memory waveform to pyannote (as a tensor with its sample rate), never a file path.
-- Read the token from `HF_TOKEN`. If it is missing, fail at setup with exit code 2 and a message saying the variable is unset; never log or echo its value.
+- Load weights from the local cache only (D11, P2-00); do not read `HF_TOKEN` at run time. Declare the weights for P2-00: the pipeline repo and its sub-models (for 3.1, `pyannote/segmentation-3.0` and `pyannote/wespeaker-voxceleb-resnet34-LM`; confirm from the pipeline's `config.yaml`). If any are not cached, setup fails with exit code 2 through the P2-00 check.
+- Disable any telemetry or update checks the installed `pyannote.audio` version has, if it has them.
 - Honor `diarization.num_speakers` (`None` lets the model estimate) and `compute.device` (`auto` picks CUDA if available, else CPU with a logged notice).
 - Convert pyannote output to a list of `SpeakerTurn` with normalized labels (`SPEAKER_00`, `SPEAKER_01`, ...), sorted by start time.
 - Report model name and version to the run manifest.
@@ -99,8 +132,9 @@ The design doc was silent or had an open question on each item below. Tasks that
 
 **Acceptance criteria**
 - Unit test: conversion from a fake pyannote annotation produces sorted, normalized `SpeakerTurn`s.
-- Missing `HF_TOKEN` gives exit code 2 before any file is processed; a test asserts a dummy token value never appears in logs.
-- `@pytest.mark.gpu`: on a two-speaker example file, diarization returns at least two speakers and turns covering most of the speech.
+- With the pyannote weights missing from the cache, a run exits 2 before any file is processed and names the missing repos.
+- With `HF_TOKEN` unset, a run with cached weights still succeeds (`@pytest.mark.gpu`).
+- `@pytest.mark.gpu`: on a two-speaker example file, diarization returns at least two speakers and turns covering most of the speech, with offline mode forced and the network guard active.
 
 ---
 
@@ -111,6 +145,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 **Depends on:** D1, D4 (resolved).
 
 **Scope** (in `murmurs.backends`)
+- First, find out how CrisperWhisper's `ct2` loader locates weights (Hugging Face cache, its own download path, or a local directory) and confirm it loads with no network. Report this in the summary before building on it. Declare its weights for P2-00.
 - `CrisperWhisperTranscriber` implementing `Transcriber`, using the `ct2` backend and `transcribe_dual` when both modes are requested, and single-mode `transcribe` when only one is.
 - Pass the in-memory waveform and sample rate, never a file path.
 - Load and run the `ct2` model on one dedicated thread for the life of the worker process. All calls go through that thread.
@@ -128,7 +163,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 - A test asserts every call to the model happens on the same thread.
 - `modes: [intended]` produces only the intended transcript.
 - Sentinel test: a stub transcriber returning `SENTINEL_PHI_7f3a` runs through the stage and the sentinel never appears in logs, metrics or console output.
-- `@pytest.mark.gpu`: on an example file, both transcripts are non-empty, word timestamps increase monotonically, and the last word ends within the audio duration.
+- `@pytest.mark.gpu`: on an example file, both transcripts are non-empty, word timestamps increase monotonically, and the last word ends within the audio duration, with offline mode forced and the network guard active.
 
 ---
 
@@ -170,6 +205,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 - `LLMClient` implementation for GPT-OSS 120B, served per D6.
 - Structured output: callers pass a pydantic model and get a validated instance back. Invalid output is retried a bounded number of times, then raises a typed pipeline error with a code, never the response text.
 - Setup check: if the model cannot be loaded or reached, fail at setup with exit code 2.
+- Declare everything the model needs for P2-00, including tokenizer vocabulary files fetched on first use (GPT-OSS's `openai-harmony` encoding is believed to download its vocabulary separately; vLLM documents `TIKTOKEN_ENCODINGS_BASE` for offline use). Confirm the model starts with no network.
 - Prompts and responses are never logged, including on error and in `--debug-unsafe` tracebacks' local variables if avoidable. Log only token counts and durations.
 - Report model name and version to the run manifest.
 
@@ -180,7 +216,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 - Invalid structured output triggers retries, then a typed error whose message has no response content.
 - Sentinel test: a prompt and response containing the sentinel never leak to logs.
 - If served over a socket per D6, a test asserts the client refuses any host that is not loopback.
-- `@pytest.mark.gpu`: a trivial structured request returns a valid object.
+- `@pytest.mark.gpu`: a trivial structured request returns a valid object, with offline mode forced and the network guard active.
 
 ---
 
@@ -270,7 +306,9 @@ The design doc was silent or had an open question on each item below. Tasks that
 - No audio files appear anywhere outside the input directory during either test.
 - Input files are byte-identical and have unchanged modification times.
 - No log, metric, manifest or console output contains the sentinel.
-- GPU test: every example file produces speaker-labeled verbatim and intended transcripts.
+- GPU test: every example file produces speaker-labeled verbatim and intended transcripts, run with offline mode forced, the network guard active and `HF_TOKEN` unset.
+- `murmurs models check` exits 0 for the example job config on the deployment machine.
+- The sample run on the example audio is done with the machine's network disconnected (a human step; note it in the task summary).
 - Reviewers record that the example transcripts are acceptable (a human step; note the date and reviewers in the task summary).
 - `murmurs eval check` passes on the full evaluation set.
 - All checks in `.claude/CLAUDE.md` pass.

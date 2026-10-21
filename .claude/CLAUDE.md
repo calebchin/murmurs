@@ -50,6 +50,7 @@ Before finishing any task, run `uv run ruff check .`, `uv run ruff format --chec
 
 - Write tests alongside the code for every task. Acceptance criteria in task files are written as tests; make them real tests.
 - Default tests must run on a CPU-only machine with no network and no model weights. Mark anything that loads a real model with `@pytest.mark.gpu`.
+- All tests, including GPU tests, run with the network blocked: an autouse fixture in `tests/conftest.py` makes non-`AF_UNIX` socket connections and remote name lookups raise `NetworkBlockedError`. Tests that need a Hugging Face cache point `huggingface_hub.constants.HF_HUB_CACHE` at a temporary folder.
 - Use fixtures in `tests/fixtures/`: tiny audio clips and short fake transcripts with planted fake PHI. Never commit real interview data.
 - Every stage that touches transcript text needs a test that runs it with a sentinel string (e.g. `SENTINEL_PHI_7f3a`) and asserts the sentinel never appears in captured logs.
 
@@ -58,7 +59,8 @@ Before finishing any task, run `uv run ruff check .`, `uv run ruff format --chec
 - Transcription uses `crisperwhisper[ct2]` (Linux x86_64 only). Never install `faster-whisper` or upstream `ctranslate2` in the same environment; they overwrite the fork CrisperWhisper depends on.
 - The CrisperWhisper `ct2` model must be loaded and run on a single dedicated thread. Parallelism uses separate processes.
 - Audio decoding uses `torchcodec` with the system `ffmpeg`. Keep the `torch` and `torchcodec` versions compatible (see torchcodec's compatibility table); pyannote also depends on `torch`.
-- Diarization uses `pyannote/speaker-diarization-3.1`, a gated Hugging Face model. It reads the token from the `HF_TOKEN` environment variable. Never hard-code or log the token.
+- Diarization uses `pyannote/speaker-diarization-3.1`, a gated Hugging Face model. Only `murmurs models download` reads the token, from the `HF_TOKEN` environment variable; runs load cached weights and never read it. Never hard-code or log the token.
+- The pipeline must run with no network connection. Real backends load weights from the local cache only and import model libraries lazily (inside the factory), never at import time of `murmurs.backends.registry`.
 - NER uses `OpenMed/privacy-filter-nemotron-v2`; LLM uses GPT-OSS 120B. Both run locally.
 - Do not add new dependencies without saying so in your summary and explaining why.
 

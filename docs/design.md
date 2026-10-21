@@ -1,6 +1,6 @@
 # Murmurs — Audio Interview to Cleaned Transcript Design Doc
 
-Last updated: Oct 20, 2026
+Last updated: Oct 21, 2026
 
 ## Summary and motivation
 
@@ -44,6 +44,7 @@ The core pipeline is a Python library; the first release is a single-user deskto
 - **CLI:** runs jobs from a config file.
 - **GUI:** a local web app over the same library, possibly a native desktop app later.
 - **Where models run:** STT, diarization and LLM models run on the user's machine, or on a local server workstation if installed there. No data leaves that machine.
+- **Offline operation:** after a one-time setup step done while connected (install packages, download all model weights), the pipeline runs with no network connection at all. See Operations and packaging.
 
 Starting single-user avoids authentication and multi-user security work in the first version.
 
@@ -287,7 +288,8 @@ The tool picks open-source models that fit available GPU memory, parallelizes wh
 - **Resources:** a set of open-source models sized to available GPU memory, with CPU as a last-resort fallback.
 - **Parallelism:** transcription and deidentification run in parallel when memory allows.
 - **Observability:** per-stage progress reporting, PHI-free structured logs, and timing metrics.
-- **Packaging:** uv as the package manager. Audio decoding uses torchcodec, which needs a system ffmpeg install.
+- **Packaging:** uv as the package manager. Audio decoding uses torchcodec, which needs a system ffmpeg install. Offline runs use `uv run --frozen` (or `UV_OFFLINE=1`) so uv never tries to resolve or fetch packages.
+- **Offline operation:** the first deployment machine runs disconnected. Setup, done while connected, is `uv sync` plus `murmurs models download`, which fetches every model the job config names into the local Hugging Face cache, including sub-models (e.g. pyannote's segmentation and embedding models) and auxiliary files (e.g. tokenizer vocabularies, remote model code). At run time the pipeline forces Hugging Face offline mode before any model library is imported, never reads `HF_TOKEN`, and fails at setup with a clear message if a required model is not cached. The token is needed only by the download command, for gated models.
 - **Extensibility:** STT, diarization, NER and LLM backends sit behind interfaces so they can be swapped without touching pipeline code.
 - **Output formats:** plain text for transcripts; JSON for metadata and other artifacts.
 
@@ -307,6 +309,7 @@ Version 1 is built in four phases, CLI only until phase 4; each phase ends with 
 
 ### Phase 2: Transcription and evaluation set
 
+- Offline setup: model download command, forced offline mode at run time, cached-weights check
 - Ingest and validate, audio loading, diarization, transcription, speaker assignment
 - LLM diarization correction, off or on via config
 - Sample runs on a handful of files
@@ -318,7 +321,7 @@ Testing uses example audio provided by the project owner, since the pipeline mus
 
 ### Phase 3: Deidentification
 
-- NER and LLM ensemble with NER label mapping (redact, flag, ignore)
+- NER and LLM ensemble with NER label mapping (redact, flag, ignore); the NER backend declares its weights (and any remote model code) for the offline download command
 - Indexed tags kept consistent across chunks
 - Confidence from detector agreement; edge-case flagging
 - Annotated and clean transcript outputs

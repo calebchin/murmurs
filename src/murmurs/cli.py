@@ -8,8 +8,11 @@ import typer
 import yaml
 
 from murmurs import __version__
+from murmurs.backends import registry
+from murmurs.backends.registry import BackendKind, WeightsPlan
 from murmurs.config import ConfigError, JobConfig, parse_assignment, resolve_config
 from murmurs.errors import SetupError
+from murmurs.offline import WeightDownloadError, cached_revision, download_weight, enforce_offline
 from murmurs.runner import EXIT_SETUP_ERROR, run_job
 from murmurs.store import StoreError
 
@@ -28,6 +31,16 @@ app = typer.Typer(
 
 config_app = typer.Typer(help="Inspect the job config format.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
+
+models_app = typer.Typer(
+    help="Download model weights ahead of time, and check they are cached for offline runs.",
+    no_args_is_help=True,
+)
+app.add_typer(models_app, name="models")
+
+ConfigOption = Annotated[
+    Path, typer.Option("--config", "-c", help="Job config file (YAML).", show_default=False)
+]
 
 
 def _version_callback(value: bool) -> None:
@@ -53,9 +66,7 @@ def main(
 
 @app.command()
 def run(
-    config: Annotated[
-        Path, typer.Option("--config", "-c", help="Job config file (YAML).", show_default=False)
-    ],
+    config: ConfigOption,
     input_dir: Annotated[
         Path | None, typer.Option(help="Override data.input_dir.", show_default=False)
     ] = None,
@@ -167,3 +178,66 @@ def _fail_setup(message: str) -> NoReturn:
 def config_schema() -> None:
     """Print the job config JSON Schema."""
     typer.echo(json.dumps(JobConfig.model_json_schema(), indent=2))
+
+
+def _weights_plan(config: Path) -> WeightsPlan:
+    """Weights for every backend the config selects, whatever its stage range."""
+    try:
+        job = resolve_config(config, [])
+    except ConfigError as exc:
+        _fail_config(exc)
+    plan = registry.required_weights(job, list(BackendKind))
+    for message in plan.unavailable:
+        typer.echo(f"unavailable  {message}", err=True)
+    return plan
+
+
+@models_app.command("download")
+def models_download(config: ConfigOption) -> None:
+    """Download every model the config selects into the local Hugging Face cache.
+
+    Run this while connected to the internet. Gated models need HF_TOKEN set (or a saved
+    `hf auth login`).
+    """
+    plan = _weights_plan(config)
+    failed = False
+    for spec in plan.weights:
+        typer.echo(f"downloading  {spec.label}")
+        try:
+            result = download_weight(spec)
+        except WeightDownloadError as exc:
+            typer.echo(f"failed       {spec.label}: {exc}", err=True)
+            failed = True
+            continue
+        typer.echo(f"ok           {spec.label} ({_size(result.size_bytes)}, {result.revision})")
+    if not plan.weights and not plan.unavailable:
+        typer.echo("no model weights to download")
+    raise typer.Exit(EXIT_SETUP_ERROR if failed or plan.unavailable else 0)
+
+
+@models_app.command("check")
+def models_check(config: ConfigOption) -> None:
+    """Report whether every model the config selects is cached. Never uses the network.
+
+    Exit code 0 if all are cached, 2 otherwise.
+    """
+    enforce_offline()
+    plan = _weights_plan(config)
+    missing = False
+    for spec in plan.weights:
+        revision = cached_revision(spec)
+        if revision is None:
+            typer.echo(f"missing      {spec.label}")
+            missing = True
+        else:
+            typer.echo(f"cached       {spec.label} ({revision})")
+    if not plan.weights and not plan.unavailable:
+        typer.echo("no model weights needed")
+    raise typer.Exit(EXIT_SETUP_ERROR if missing or plan.unavailable else 0)
+
+
+def _size(n_bytes: int) -> str:
+    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if n_bytes >= scale:
+            return f"{n_bytes / scale:.1f} {unit}"
+    return f"{n_bytes} B"

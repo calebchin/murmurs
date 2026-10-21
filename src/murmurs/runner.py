@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import TextIO
 
 from murmurs.backends import registry
+from murmurs.backends.registry import BackendKind
 from murmurs.config import JobConfig, Stage
-from murmurs.errors import PipelineError, SetupError
+from murmurs.errors import BackendSetupError, PipelineError, SetupError
 from murmurs.logging import (
     FileOutcome,
     LoggerProgress,
@@ -28,6 +29,7 @@ from murmurs.logging import (
 )
 from murmurs.manifest import finish_manifest, sample_job_id, select_sample, start_manifest
 from murmurs.models import ErrorInfo, FileStatus, StageStatus, TranscriptMode
+from murmurs.offline import check_cached, enforce_offline
 from murmurs.stages import (
     DEPENDS,
     MISSING_UPSTREAM,
@@ -170,16 +172,45 @@ def parse_modes(config: JobConfig) -> tuple[TranscriptMode, ...]:
     return modes
 
 
+def backend_kinds(stages: list[Stage]) -> set[BackendKind]:
+    """The kinds of backend the given stages use."""
+    audio_stages = {Stage.INGEST, Stage.LOAD_AUDIO, Stage.DIARIZE, Stage.TRANSCRIBE}
+    kinds = set()
+    if audio_stages.intersection(stages):
+        kinds.add(BackendKind.AUDIO_LOADER)
+    if Stage.DIARIZE in stages:
+        kinds.add(BackendKind.DIARIZER)
+    if Stage.TRANSCRIBE in stages:
+        kinds.add(BackendKind.TRANSCRIBER)
+    if Stage.DETECT_PHI in stages:
+        kinds.add(BackendKind.NER)
+    return kinds
+
+
+def check_weights(config: JobConfig, stages: list[Stage]) -> dict[str, str]:
+    """Check that the weights the given stages' backends need are cached.
+
+    Returns the cached commit hash per weight label. Raises ``BackendSetupError`` if a
+    selected backend is not registered, or ``MissingWeightsError`` if weights are missing.
+    """
+    plan = registry.required_weights(config, sorted(backend_kinds(stages)))
+    if plan.unavailable:
+        raise BackendSetupError("; ".join(plan.unavailable))
+    return check_cached(plan.weights)
+
+
 def create_backends(config: JobConfig, stages: list[Stage]) -> Backends:
     """Create only the backends the given stages use."""
-    audio_stages = {Stage.INGEST, Stage.LOAD_AUDIO, Stage.DIARIZE, Stage.TRANSCRIBE}
+    kinds = backend_kinds(stages)
     return Backends(
         audio_loader=(
-            registry.create_audio_loader(config) if audio_stages.intersection(stages) else None
+            registry.create_audio_loader(config) if BackendKind.AUDIO_LOADER in kinds else None
         ),
-        diarizer=registry.create_diarizer(config) if Stage.DIARIZE in stages else None,
-        transcriber=registry.create_transcriber(config) if Stage.TRANSCRIBE in stages else None,
-        ner=registry.create_ner_detector(config) if Stage.DETECT_PHI in stages else None,
+        diarizer=registry.create_diarizer(config) if BackendKind.DIARIZER in kinds else None,
+        transcriber=(
+            registry.create_transcriber(config) if BackendKind.TRANSCRIBER in kinds else None
+        ),
+        ner=registry.create_ner_detector(config) if BackendKind.NER in kinds else None,
     )
 
 
@@ -201,7 +232,12 @@ def run_job(
 
     A sample run (``sample.enabled``) processes ``sample.n_files`` files chosen with
     ``sample.seed`` and writes to ``<job_id>-sample``.
+
+    Hugging Face offline mode is forced for the rest of the process. When ``backends``
+    is not given, the weights they need must already be cached
+    (``murmurs models download``); otherwise ``MissingWeightsError`` is raised.
     """
+    enforce_offline()
     modes = parse_modes(config)
     if config.sample.enabled:
         job_id = sample_job_id(job_id)
@@ -220,7 +256,10 @@ def run_job(
     stages = stage_range(config)
     if config.compute.parallel_workers > 1:
         logger.warning("parallelism_not_implemented", n_workers=config.compute.parallel_workers)
+    weight_revisions: dict[str, str] = {}
     if backends is None:
+        weight_revisions = check_weights(config, stages)
+        logger.info("weights_cached", count=len(weight_revisions))
         backends = create_backends(config, stages)
 
     summary = JobSummary(job_id=job_id, duplicates=discovery.duplicates)
@@ -236,7 +275,7 @@ def run_job(
     manifest = start_manifest(
         job_id,
         config,
-        model_versions=_model_versions(backends),
+        model_versions={**_model_versions(backends), **weight_revisions},
         input_hashes={f.file_id: f.content_hash for f in files},
     )
     store.write_manifest(manifest)

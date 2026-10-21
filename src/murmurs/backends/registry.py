@@ -11,11 +11,17 @@ The name for each kind comes from an existing config field, so no extra config i
 The name ``"stub"`` selects the stub for any kind. Real backends register under their
 model names in later phases. Backends are created on demand, so a run that stops
 before PHI detection never loads the NER model or the LLM.
+
+Each registration can declare the model weights its backend needs (see
+``murmurs.offline``), so they can be downloaded ahead of time and checked before a run.
+Factories must import model libraries inside the factory, never at module level here,
+so that offline mode is in force before those libraries are imported.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -29,6 +35,7 @@ from murmurs.backends.stubs import (
 )
 from murmurs.config import JobConfig
 from murmurs.errors import BackendSetupError
+from murmurs.offline import WeightSpec
 
 STUB = "stub"
 DEFAULT_AUDIO_LOADER = "default"
@@ -45,6 +52,25 @@ class BackendKind(StrEnum):
 
 
 Factory = Callable[[JobConfig], Any]
+WeightsFn = Callable[[JobConfig], Sequence[WeightSpec]]
+"""Returns the weights a backend needs for a given job config."""
+
+
+@dataclass(frozen=True)
+class _Entry:
+    factory: Factory
+    weights: WeightsFn | None = None
+
+
+@dataclass(frozen=True)
+class WeightsPlan:
+    """The weights a set of backends needs, and any backends with no implementation."""
+
+    weights: list[WeightSpec]
+    """Deduplicated, in declaration order."""
+    unavailable: list[str]
+    """One message per selected backend name that is not registered."""
+
 
 _PROTOCOLS: dict[BackendKind, type] = {
     BackendKind.AUDIO_LOADER: AudioLoader,
@@ -54,12 +80,18 @@ _PROTOCOLS: dict[BackendKind, type] = {
     BackendKind.LLM: LLMClient,
 }
 
-_registry: dict[tuple[BackendKind, str], Factory] = {}
+_registry: dict[tuple[BackendKind, str], _Entry] = {}
 
 
-def register(kind: BackendKind, name: str, factory: Factory) -> None:
-    """Register ``factory`` as the implementation of ``kind`` called ``name``."""
-    _registry[(kind, name)] = factory
+def register(
+    kind: BackendKind, name: str, factory: Factory, weights: WeightsFn | None = None
+) -> None:
+    """Register ``factory`` as the implementation of ``kind`` called ``name``.
+
+    ``weights`` declares the model weights the backend loads; omit it for backends that
+    load none (stubs, the audio loader).
+    """
+    _registry[(kind, name)] = _Entry(factory, weights)
 
 
 def backend_name(kind: BackendKind, config: JobConfig) -> str:
@@ -77,12 +109,30 @@ def backend_name(kind: BackendKind, config: JobConfig) -> str:
             return config.deid.llm_model
 
 
+def _unavailable(kind: BackendKind, name: str) -> str:
+    return f"no {kind.value} backend named '{name}' is available"
+
+
+def required_weights(config: JobConfig, kinds: Iterable[BackendKind]) -> WeightsPlan:
+    """The weights the backends of ``kinds`` selected by ``config`` declare."""
+    weights: dict[WeightSpec, None] = {}
+    unavailable: list[str] = []
+    for kind in kinds:
+        name = backend_name(kind, config)
+        entry = _registry.get((kind, name))
+        if entry is None:
+            unavailable.append(_unavailable(kind, name))
+        elif entry.weights is not None:
+            weights.update(dict.fromkeys(entry.weights(config)))
+    return WeightsPlan(weights=list(weights), unavailable=unavailable)
+
+
 def _create(kind: BackendKind, config: JobConfig) -> Any:
     name = backend_name(kind, config)
-    factory = _registry.get((kind, name))
-    if factory is None:
-        raise BackendSetupError(f"no {kind.value} backend named '{name}' is available")
-    backend = factory(config)
+    entry = _registry.get((kind, name))
+    if entry is None:
+        raise BackendSetupError(_unavailable(kind, name))
+    backend = entry.factory(config)
     if not isinstance(backend, _PROTOCOLS[kind]):
         raise BackendSetupError(f"{kind.value} backend '{name}' does not satisfy its protocol")
     return backend
