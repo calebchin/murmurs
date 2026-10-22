@@ -393,6 +393,47 @@ wheels = [
 ]
 
 [[package]]
+name = "crisperwhisper"
+version = "2.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "soundfile" },
+    { name = "soxr" },
+    { name = "tokenizers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/48/80/901f5e22fe229e77a2189c1d5a51cce2317d3b69185c69cfc8766fe80e0a/crisperwhisper-2.0.3.tar.gz", hash = "sha256:6b376db36b6d746b23045de373a8c1a6249ea5fe99cd7cb9aec4afb8ddd0065d", size = 128854, upload-time = "2026-09-14T11:33:46.274Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3a/8e/06d5918dcd3fc070e7b7d87bd228a8da2d1f1be88b4ae9c4f32b7cfe26f8/crisperwhisper-2.0.3-py3-none-any.whl", hash = "sha256:526dd8556883808d0ccbc4da38b05181953a4f7599a16c7a721e47d7590e108a", size = 107068, upload-time = "2026-09-14T11:33:44.836Z" },
+]
+
+[package.optional-dependencies]
+ct2 = [
+    { name = "ctranslate2-crisperwhisper" },
+    { name = "nvidia-cublas-cu12" },
+]
+
+[[package]]
+name = "ctranslate2-crisperwhisper"
+version = "4.7.1.post3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyyaml" },
+    { name = "setuptools" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/10/a3a3757b253f07a12c240afeee1c97466a0b7c4ce9e962a27d40d14ec815/ctranslate2_crisperwhisper-4.7.1.post3-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4f4efab86642a1055852461cda141218e3cbae7447ae86ecea13286475056022", size = 40318788, upload-time = "2026-07-15T10:59:44.381Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/b4/4a82c5f5047cd627a2695c0ce6f86e064273e8489a71ac59ef38484b9cf4/ctranslate2_crisperwhisper-4.7.1.post3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:271e3271fbc58c9b6b1a1d78412f58506809ffa4cfce667ed90879e061c4eeb4", size = 40477981, upload-time = "2026-07-15T10:59:47.255Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/c7/3701889a68f52223f5315e1304319e3d54a811f77f15cb795890a270b2c7/ctranslate2_crisperwhisper-4.7.1.post3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b996b0b00ef045718ed8680e0590b537b10e9dd331f328884ec41d667d7719c2", size = 40480969, upload-time = "2026-07-15T10:59:51.019Z" },
+    { url = "https://files.pythonhosted.org/packages/51/37/75c7f07d7895238089289602c059647644e197cd336381bfddd5b9c00e94/ctranslate2_crisperwhisper-4.7.1.post3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:2b45cd5244f515b4ccf0c125f26ae679ef6f71031cbce78523b3875947217750", size = 40448597, upload-time = "2026-07-15T10:59:54.676Z" },
+    { url = "https://files.pythonhosted.org/packages/60/a5/fba9e5f08be1a0c1c3e602c20f5c965545461e8940911c76048628584e1b/ctranslate2_crisperwhisper-4.7.1.post3-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d3af10da8cbabb603d363d8a96f1329baba838820dde7fbdf486bd6e86713e12", size = 40433821, upload-time = "2026-07-15T10:59:57.877Z" },
+]
+
+[[package]]
 name = "cuda-bindings"
 version = "13.4.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1099,6 +1140,7 @@ name = "murmurs"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "crisperwhisper", extra = ["ct2"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "huggingface-hub" },
     { name = "librosa", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "librosa", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -1122,6 +1164,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "crisperwhisper", extras = ["ct2"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=2.0.3,<2.1" },
     { name = "huggingface-hub", specifier = ">=2.2.0" },
     { name = "librosa", specifier = ">=0.11,<1.1" },
     { name = "numpy", specifier = ">=1.26" },
@@ -1453,6 +1496,17 @@ wheels = [
 ]
 
 [[package]]
+name = "nvidia-cublas-cu12"
+version = "12.9.2.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nvidia-cuda-nvrtc-cu12" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/c0/0a517bfe63ccd3b92eb254d264e28fca3c7cab75d07daea315250fb1bf73/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:e4f53a8ca8c5d6e8c492d0d0a3d565ecb59a751b19cfdaa4f6da0ab2104c1702", size = 581240110, upload-time = "2026-04-08T18:52:31.532Z" },
+]
+
+[[package]]
 name = "nvidia-cuda-cupti"
 version = "13.0.85"
 source = { registry = "https://pypi.org/simple" }
@@ -1468,6 +1522,14 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c3/68/483a78f5e8f31b08fb1bb671559968c0ca3a065ac7acabfc7cee55214fd6/nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:ad9b6d2ead2435f11cbb6868809d2adeeee302e9bb94bcf0539c7a40d80e8575", size = 90215200, upload-time = "2025-09-04T08:28:44.204Z" },
     { url = "https://files.pythonhosted.org/packages/b7/dc/6bb80850e0b7edd6588d560758f17e0550893a1feaf436807d64d2da040f/nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d27f20a0ca67a4bb34268a5e951033496c5b74870b868bacd046b1b8e0c3267b", size = 43015449, upload-time = "2025-09-04T08:28:20.239Z" },
+]
+
+[[package]]
+name = "nvidia-cuda-nvrtc-cu12"
+version = "12.9.86"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/85/e4af82cc9202023862090bfca4ea827d533329e925c758f0cde964cb54b7/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:210cf05005a447e29214e9ce50851e83fc5f4358df8b453155d5e1918094dcb4", size = 89568129, upload-time = "2025-06-05T20:02:41.973Z" },
 ]
 
 [[package]]

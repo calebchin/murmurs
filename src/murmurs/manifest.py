@@ -22,7 +22,7 @@ KEY_DEPENDENCIES = (
     "torch",
     "torchcodec",
     "crisperwhisper",
-    "ctranslate2",
+    "ctranslate2-crisperwhisper",
     "transformers",
     "librosa",
 )

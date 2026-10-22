@@ -29,7 +29,7 @@ from murmurs.logging import (
 )
 from murmurs.manifest import finish_manifest, sample_job_id, select_sample, start_manifest
 from murmurs.models import ErrorInfo, FileStatus, StageStatus, TranscriptMode
-from murmurs.offline import check_cached, enforce_offline
+from murmurs.offline import check_cached, check_prepared, enforce_offline
 from murmurs.stages import (
     DEPENDS,
     MISSING_UPSTREAM,
@@ -192,12 +192,15 @@ def check_weights(config: JobConfig, stages: list[Stage]) -> dict[str, str]:
     """Check that the weights the given stages' backends need are cached.
 
     Returns the cached commit hash per weight label. Raises ``BackendSetupError`` if a
-    selected backend is not registered, or ``MissingWeightsError`` if weights are missing.
+    selected backend is not registered, ``MissingWeightsError`` if weights are missing,
+    or ``UnpreparedModelError`` if a model built from them has not been prepared.
     """
     plan = registry.required_weights(config, sorted(backend_kinds(stages)))
     if plan.unavailable:
         raise BackendSetupError("; ".join(plan.unavailable))
-    return check_cached(plan.weights)
+    revisions = check_cached(plan.weights)
+    check_prepared(plan.prepared)
+    return revisions
 
 
 def create_backends(config: JobConfig, stages: list[Stage]) -> Backends:

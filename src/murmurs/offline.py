@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -88,8 +88,8 @@ def enforce_offline() -> None:
         constants.HF_HUB_OFFLINE = True  # type: ignore[attr-defined]
 
 
-def cached_revision(spec: WeightSpec) -> str | None:
-    """Commit hash of the complete cached snapshot for ``spec``, or None if it is missing,
+def cached_snapshot(spec: WeightSpec) -> Path | None:
+    """Folder of the complete cached snapshot for ``spec``, or None if it is missing,
     incomplete or empty. Never uses the network."""
     from huggingface_hub import snapshot_download
     from huggingface_hub.errors import LocalEntryNotFoundError
@@ -108,7 +108,47 @@ def cached_revision(spec: WeightSpec) -> str | None:
     path = Path(folder)
     if not any(path.iterdir()):
         return None
-    return path.name
+    return path
+
+
+def cached_revision(spec: WeightSpec) -> str | None:
+    """Commit hash of the complete cached snapshot for ``spec``, or None if it is missing,
+    incomplete or empty. Never uses the network."""
+    path = cached_snapshot(spec)
+    return None if path is None else path.name
+
+
+@dataclass(frozen=True, eq=False)
+class PreparedModel:
+    """A model derived from downloaded weights, such as a format conversion.
+
+    ``murmurs models download`` calls ``prepare`` after downloading the weights; it runs
+    offline and may be slow. ``is_ready`` is a fast, offline check of its output. Runs
+    and ``murmurs models check`` treat a model that is not ready as missing.
+    """
+
+    label: str
+    """Short name shown to the user; also the deduplication key."""
+    is_ready: Callable[[], bool]
+    prepare: Callable[[], None]
+
+
+class UnpreparedModelError(SetupError):
+    """Downloaded weights still need their one-time preparation; the job cannot start."""
+
+    def __init__(self, labels: Sequence[str]) -> None:
+        self.labels = list(labels)
+        super().__init__(
+            f"models not prepared: {', '.join(self.labels)}. While the weights are cached, "
+            "run `murmurs models download --config <this job's config>` to prepare them."
+        )
+
+
+def check_prepared(models: Sequence[PreparedModel]) -> None:
+    """Raise ``UnpreparedModelError`` naming every model that is not ready."""
+    missing = [m.label for m in models if not m.is_ready()]
+    if missing:
+        raise UnpreparedModelError(missing)
 
 
 def check_cached(specs: Sequence[WeightSpec]) -> dict[str, str]:

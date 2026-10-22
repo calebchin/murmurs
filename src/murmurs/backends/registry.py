@@ -21,12 +21,18 @@ so that offline mode is in force before those libraries are imported.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber
 from murmurs.backends.audio import TorchcodecAudioLoader
+from murmurs.backends.crisper import MODEL_ID as CRISPERWHISPER_ID
+from murmurs.backends.crisper import (
+    create_crisperwhisper,
+    crisperwhisper_prepared,
+    crisperwhisper_weights,
+)
 from murmurs.backends.nemotron import MODEL_ID as NEMOTRON_ID
 from murmurs.backends.nemotron import NemotronDiarizer, nemotron_weights
 from murmurs.backends.stubs import (
@@ -38,7 +44,7 @@ from murmurs.backends.stubs import (
 )
 from murmurs.config import JobConfig
 from murmurs.errors import BackendSetupError
-from murmurs.offline import WeightSpec
+from murmurs.offline import PreparedModel, WeightSpec
 
 STUB = "stub"
 DEFAULT_AUDIO_LOADER = "default"
@@ -57,12 +63,15 @@ class BackendKind(StrEnum):
 Factory = Callable[[JobConfig], Any]
 WeightsFn = Callable[[JobConfig], Sequence[WeightSpec]]
 """Returns the weights a backend needs for a given job config."""
+PreparedFn = Callable[[JobConfig], Sequence[PreparedModel]]
+"""Returns the models a backend derives from its weights (e.g. format conversions)."""
 
 
 @dataclass(frozen=True)
 class _Entry:
     factory: Factory
     weights: WeightsFn | None = None
+    prepared: PreparedFn | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +82,8 @@ class WeightsPlan:
     """Deduplicated, in declaration order."""
     unavailable: list[str]
     """One message per selected backend name that is not registered."""
+    prepared: list[PreparedModel] = field(default_factory=list)
+    """Models built from the weights after download; deduplicated by label."""
 
 
 _PROTOCOLS: dict[BackendKind, type] = {
@@ -87,14 +98,19 @@ _registry: dict[tuple[BackendKind, str], _Entry] = {}
 
 
 def register(
-    kind: BackendKind, name: str, factory: Factory, weights: WeightsFn | None = None
+    kind: BackendKind,
+    name: str,
+    factory: Factory,
+    weights: WeightsFn | None = None,
+    prepared: PreparedFn | None = None,
 ) -> None:
     """Register ``factory`` as the implementation of ``kind`` called ``name``.
 
     ``weights`` declares the model weights the backend loads; omit it for backends that
-    load none (stubs, the audio loader).
+    load none (stubs, the audio loader). ``prepared`` declares models built from those
+    weights once, after download (see ``PreparedModel``).
     """
-    _registry[(kind, name)] = _Entry(factory, weights)
+    _registry[(kind, name)] = _Entry(factory, weights, prepared)
 
 
 def backend_name(kind: BackendKind, config: JobConfig) -> str:
@@ -119,15 +135,22 @@ def _unavailable(kind: BackendKind, name: str) -> str:
 def required_weights(config: JobConfig, kinds: Iterable[BackendKind]) -> WeightsPlan:
     """The weights the backends of ``kinds`` selected by ``config`` declare."""
     weights: dict[WeightSpec, None] = {}
+    prepared: dict[str, PreparedModel] = {}
     unavailable: list[str] = []
     for kind in kinds:
         name = backend_name(kind, config)
         entry = _registry.get((kind, name))
         if entry is None:
             unavailable.append(_unavailable(kind, name))
-        elif entry.weights is not None:
+            continue
+        if entry.weights is not None:
             weights.update(dict.fromkeys(entry.weights(config)))
-    return WeightsPlan(weights=list(weights), unavailable=unavailable)
+        if entry.prepared is not None:
+            for model in entry.prepared(config):
+                prepared.setdefault(model.label, model)
+    return WeightsPlan(
+        weights=list(weights), unavailable=unavailable, prepared=list(prepared.values())
+    )
 
 
 def _create(kind: BackendKind, config: JobConfig) -> Any:
@@ -180,5 +203,12 @@ register(
 register(BackendKind.DIARIZER, STUB, lambda _: StubDiarizer())
 register(BackendKind.DIARIZER, NEMOTRON_ID, NemotronDiarizer, weights=nemotron_weights)
 register(BackendKind.TRANSCRIBER, STUB, lambda _: StubTranscriber())
+register(
+    BackendKind.TRANSCRIBER,
+    CRISPERWHISPER_ID,
+    create_crisperwhisper,
+    weights=crisperwhisper_weights,
+    prepared=crisperwhisper_prepared,
+)
 register(BackendKind.NER, STUB, lambda _: StubNERDetector())
 register(BackendKind.LLM, STUB, lambda _: StubLLMClient())

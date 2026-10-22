@@ -176,9 +176,9 @@ def test_registry_creates_stubs_from_config() -> None:
 
 
 def test_registry_unknown_name_fails_setup() -> None:
-    config = load_config(EXAMPLE)  # real model names; none registered in phase 1
-    with pytest.raises(BackendSetupError, match="no transcriber backend named"):
-        registry.create_transcriber(config)
+    config = load_config(EXAMPLE)  # real model names; the NER model is not registered yet
+    with pytest.raises(BackendSetupError, match="no ner backend named"):
+        registry.create_ner_detector(config)
 
 
 def test_registry_rejects_object_that_breaks_protocol(monkeypatch: pytest.MonkeyPatch) -> None:

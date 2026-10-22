@@ -186,7 +186,11 @@ def _weights_plan(config: Path) -> WeightsPlan:
         job = resolve_config(config, [])
     except ConfigError as exc:
         _fail_config(exc)
-    plan = registry.required_weights(job, list(BackendKind))
+    try:
+        plan = registry.required_weights(job, list(BackendKind))
+    except SetupError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(EXIT_SETUP_ERROR) from None
     for message in plan.unavailable:
         typer.echo(f"unavailable  {message}", err=True)
     return plan
@@ -196,7 +200,8 @@ def _weights_plan(config: Path) -> WeightsPlan:
 def models_download(config: ConfigOption) -> None:
     """Download every model the config selects into the local Hugging Face cache.
 
-    Run this while connected to the internet. Gated models need HF_TOKEN set (or a saved
+    Then runs any one-time preparation the models need (e.g. format conversion). Run
+    this while connected to the internet. Gated models need HF_TOKEN set (or a saved
     `hf auth login`).
     """
     plan = _weights_plan(config)
@@ -210,6 +215,19 @@ def models_download(config: ConfigOption) -> None:
             failed = True
             continue
         typer.echo(f"ok           {spec.label} ({_size(result.size_bytes)}, {result.revision})")
+    if not failed:
+        for model in plan.prepared:
+            if model.is_ready():
+                typer.echo(f"prepared     {model.label}")
+                continue
+            typer.echo(f"preparing    {model.label}")
+            try:
+                model.prepare()
+            except Exception as exc:  # library text may quote paths or contents
+                typer.echo(f"failed       {model.label} ({type(exc).__name__})", err=True)
+                failed = True
+                continue
+            typer.echo(f"prepared     {model.label}")
     if not plan.weights and not plan.unavailable:
         typer.echo("no model weights to download")
     raise typer.Exit(EXIT_SETUP_ERROR if failed or plan.unavailable else 0)
@@ -231,6 +249,12 @@ def models_check(config: ConfigOption) -> None:
             missing = True
         else:
             typer.echo(f"cached       {spec.label} ({revision})")
+    for model in plan.prepared:
+        if model.is_ready():
+            typer.echo(f"prepared     {model.label}")
+        else:
+            typer.echo(f"unprepared   {model.label}")
+            missing = True
     if not plan.weights and not plan.unavailable:
         typer.echo("no model weights needed")
     raise typer.Exit(EXIT_SETUP_ERROR if missing or plan.unavailable else 0)

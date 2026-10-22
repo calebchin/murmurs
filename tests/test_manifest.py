@@ -11,7 +11,7 @@ from conftest import SENTINEL, StubJob
 from fixtures.audio import tone_wav_bytes
 from typer.testing import CliRunner
 
-from murmurs import __version__
+from murmurs import __version__, manifest
 from murmurs.backends.stubs import StubTranscriber
 from murmurs.cli import app
 from murmurs.config import JobConfig, Stage, load_config
@@ -136,10 +136,15 @@ def test_code_version_reads_git_commit(tmp_path: Path) -> None:
     assert code_version(repo) == f"{head}-dirty"
 
 
-def test_dependency_versions_skip_missing_packages() -> None:
+def test_dependency_versions_skip_missing_packages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(manifest, "KEY_DEPENDENCIES", ("numpy", "murmurs-test-not-installed"))
     versions = dependency_versions()
     assert "numpy" in versions
-    assert "crisperwhisper" not in versions  # not installed in phase 1
+    assert "murmurs-test-not-installed" not in versions
+
+
+def test_dependency_versions_record_the_ctranslate2_fork() -> None:
+    assert "ctranslate2-crisperwhisper" in dependency_versions()
 
 
 # --- sample selection -------------------------------------------------------------------

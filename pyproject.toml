@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "crisperwhisper[ct2]>=2.0.3,<2.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
     "huggingface-hub>=2.2.0",
     "librosa>=0.11,<1.1",
     "numpy>=1.26",
