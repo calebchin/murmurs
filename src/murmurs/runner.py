@@ -1,10 +1,11 @@
-"""Stage runner: stage ranges, resume, and skip-and-report.
+"""Stage runner: stage groups, resume, and skip-and-report.
 
-Runs ``stages.start`` through ``stages.end`` for every input file, one file at a time.
-A stage is skipped on resume when its artifacts exist and it last ran with the same
-input and the same stage config hash, and none of the stages it depends on ran again
-in this job. A failure marks that stage ``failed``, skips the file's later stages and
-moves on to the next file.
+Runs ``stages.start`` through ``stages.end`` in stage groups (D21): each group runs for
+every input file before the next group starts, and each model backend is open only
+while a group that uses it runs. A stage is skipped on resume when its artifacts exist
+and it last ran with the same input and the same stage config hash, and none of the
+stages it depends on ran again in this job. A failure marks that stage ``failed`` and
+the file skips the rest of the job; other files carry on.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from murmurs.stages import (
     Backends,
     StageContext,
     stage_config,
+    stage_groups,
     stage_variants,
 )
 from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
@@ -218,6 +220,143 @@ def create_backends(config: JobConfig, stages: list[Stage]) -> Backends:
     )
 
 
+def stage_backend_kinds(stage: Stage) -> set[BackendKind]:
+    """The kinds of backend one stage calls when it runs."""
+    kinds = set()
+    if stage is Stage.INGEST or stage in WAVEFORM_STAGES:
+        kinds.add(BackendKind.AUDIO_LOADER)  # diarize and transcribe decode again on resume
+    if stage is Stage.DIARIZE:
+        kinds.add(BackendKind.DIARIZER)
+    if stage is Stage.TRANSCRIBE:
+        kinds.add(BackendKind.TRANSCRIBER)
+    if stage is Stage.DETECT_PHI:
+        kinds.add(BackendKind.NER)
+    return kinds
+
+
+AnyBackend = AudioLoader | Diarizer | Transcriber | NERDetector
+
+
+def _create(kind: BackendKind, config: JobConfig) -> AnyBackend:
+    """Create a backend of a kind the runner manages."""
+    match kind:
+        case BackendKind.AUDIO_LOADER:
+            return registry.create_audio_loader(config)
+        case BackendKind.DIARIZER:
+            return registry.create_diarizer(config)
+        case BackendKind.TRANSCRIBER:
+            return registry.create_transcriber(config)
+        case BackendKind.NER:
+            return registry.create_ner_detector(config)
+    raise ValueError(f"the runner does not manage {kind.value} backends")
+
+
+MANAGED_KINDS = (
+    BackendKind.AUDIO_LOADER,
+    BackendKind.DIARIZER,
+    BackendKind.TRANSCRIBER,
+    BackendKind.NER,
+)
+"""Kinds the runner creates and closes. Their values are attribute names on ``Backends``."""
+
+
+class _BackendPool:
+    """Backends for one job, each open only while a stage group that uses it runs (D21).
+
+    A backend is created just before the first stage that actually runs with it (so a
+    resume that skips a group loads nothing for it) and closed after the last group in
+    the run that uses it. Backends passed in by the caller are used as given and never
+    created or closed here.
+    """
+
+    def __init__(
+        self,
+        config: JobConfig,
+        groups: list[tuple[str, list[Stage]]],
+        given: Backends | None,
+        logger: RunLogger,
+    ) -> None:
+        self._config = config
+        self._logger = logger
+        self._owned = given is None
+        self.backends = given if given is not None else Backends()
+        self._last_group: dict[BackendKind, int] = {}
+        for index, (_, stages) in enumerate(groups):
+            for stage in stages:
+                for kind in stage_backend_kinds(stage):
+                    self._last_group[kind] = index
+        self.model_versions: dict[str, str] = {}
+        if not self._owned:
+            for kind in MANAGED_KINDS:
+                backend = getattr(self.backends, kind.value)
+                if backend is not None:
+                    self.model_versions[kind.value] = backend.model_version
+                    self._log_device(kind, backend)
+
+    def ensure(self, stage: Stage) -> None:
+        """Create any backend ``stage`` needs that is not open yet.
+
+        Raises ``SetupError`` if one cannot be created; the job stops (exit code 2).
+        """
+        if not self._owned:
+            return
+        for kind in sorted(stage_backend_kinds(stage)):
+            if getattr(self.backends, kind.value) is not None:
+                continue
+            try:
+                backend = _create(kind, self._config)
+            except SetupError:
+                raise
+            except Exception as exc:  # e.g. out of GPU memory; library text is dropped
+                raise BackendSetupError(
+                    f"could not create the {kind.value} backend ({type(exc).__name__})"
+                ) from None
+            setattr(self.backends, kind.value, backend)
+            self.model_versions[kind.value] = backend.model_version
+            self._logger.info("backend_open", backend=kind.value)
+            self._log_device(kind, backend)
+
+    def _log_device(self, kind: BackendKind, backend: AnyBackend) -> None:
+        if getattr(backend, "device_fallback", False):
+            self._logger.warning("device_fallback_cpu", backend=kind.value)
+
+    def close_after(self, group_index: int) -> None:
+        """Close the backends no later group in this run uses."""
+        for kind, last in self._last_group.items():
+            if last == group_index:
+                self._close(kind)
+
+    def close_all(self) -> None:
+        """Close every backend still open (end of job, Ctrl-C or error)."""
+        for kind in MANAGED_KINDS:
+            self._close(kind)
+
+    def _close(self, kind: BackendKind) -> None:
+        if not self._owned:
+            return
+        backend = getattr(self.backends, kind.value)
+        if backend is None:
+            return
+        setattr(self.backends, kind.value, None)
+        try:
+            backend.close()
+        except Exception as exc:  # a failed close must not hide the job's own outcome
+            self._logger.exception(exc, event="backend_close_failed")
+        else:
+            self._logger.info("backend_close", backend=kind.value)
+
+
+@dataclass
+class _FileRun:
+    """One file's state for the whole job, carried across stage groups."""
+
+    file: InputFile
+    status: FileStatus
+    ctx: StageContext
+    ran: set[Stage] = field(default_factory=set)
+    failed: bool = False
+
+
 def run_job(
     config: JobConfig,
     job_id: str,
@@ -230,8 +369,13 @@ def run_job(
 ) -> JobSummary:
     """Run a job and return its summary.
 
+    Stage groups run in order, each for every file before the next group starts (D21);
+    a file that fails a stage skips the rest of the job. Each backend is created just
+    before the first stage that runs with it and closed after its last group.
+
     Raises ``SetupError`` (or ``StoreError`` for an unsafe output location) if the job
-    cannot start; those map to exit code 2. Per-file failures are reported in the
+    cannot start, or if a backend cannot be created when its group starts; those map to
+    exit code 2, and completed stages are kept. Per-file failures are reported in the
     summary instead. ``KeyboardInterrupt`` stops the job; completed stages are kept.
 
     A sample run (``sample.enabled``) processes ``sample.n_files`` files chosen with
@@ -258,16 +402,14 @@ def run_job(
     progress = progress if progress is not None else LoggerProgress(logger)
 
     stages = stage_range(config)
+    groups = stage_groups(stages)
     if config.compute.parallel_workers > 1:
         logger.warning("parallelism_not_implemented", n_workers=config.compute.parallel_workers)
     weight_revisions: dict[str, str] = {}
     if backends is None:
         weight_revisions = check_weights(config, stages)
         logger.info("weights_cached", count=len(weight_revisions))
-        backends = create_backends(config, stages)
-    for kind, backend in _created(backends).items():
-        if getattr(backend, "device_fallback", False):
-            logger.warning("device_fallback_cpu", backend=kind)
+    pool = _BackendPool(config, groups, backends, logger)
 
     summary = JobSummary(job_id=job_id, duplicates=discovery.duplicates)
     for dup in discovery.duplicates:
@@ -282,24 +424,42 @@ def run_job(
     manifest = start_manifest(
         job_id,
         config,
-        model_versions={**_model_versions(backends), **weight_revisions},
+        model_versions={**pool.model_versions, **weight_revisions},
         input_hashes={f.file_id: f.content_hash for f in files},
     )
     store.write_manifest(manifest)
     metrics = MetricsRecorder(job_id)
     hashes = stage_hashes(config)
+    runs = [_start_file(file, config, store, pool.backends, modes) for file in files]
+    step = _Step(config, store, pool, modes, stages, hashes, logger, progress, metrics, summary)
     completed = False
     try:
-        for file in files:
-            outcome = _run_file(
-                file, config, store, backends, modes, stages, hashes, logger, progress, metrics,
-                summary,
-            )  # fmt: skip
-            progress.on_file_done(file.file_id, outcome)
+        for index, (name, group_stages) in enumerate(groups):
+            active = [run for run in runs if not run.failed]
+            logger.info("group_start", group=name, n_files=len(active))
+            for run in active:
+                for stage in group_stages:
+                    if not step.run(run, stage):
+                        break
+                run.ctx.release_waveform()
+                if run.failed:
+                    progress.on_file_done(run.file.file_id, FileOutcome.FAILED)
+            logger.info("group_end", group=name, n_files=len(active))
+            pool.close_after(index)
+        for run in runs:
+            if run.failed:
+                continue
+            outcome = FileOutcome.DONE if run.ran else FileOutcome.SKIPPED
+            (summary.done if run.ran else summary.skipped).append(run.file.file_id)
+            progress.on_file_done(run.file.file_id, outcome)
         completed = True
     finally:
+        pool.close_all()
         metrics.write(store.job_dir / "metrics.json")
         statuses = [s for f in files if (s := store.read_status(f.file_id)) is not None]
+        manifest = manifest.model_copy(
+            update={"model_versions": {**pool.model_versions, **weight_revisions}}
+        )
         store.write_manifest(finish_manifest(manifest, statuses, completed))
 
     for failure in summary.failed:
@@ -320,85 +480,75 @@ def run_job(
     return summary
 
 
-def _created(backends: Backends) -> dict[str, AudioLoader | Diarizer | Transcriber | NERDetector]:
-    """The backends the job created, by kind."""
-    created: dict[str, AudioLoader | Diarizer | Transcriber | NERDetector | None] = {
-        "audio_loader": backends.audio_loader,
-        "diarizer": backends.diarizer,
-        "transcriber": backends.transcriber,
-        "ner": backends.ner,
-    }
-    return {kind: b for kind, b in created.items() if b is not None}
-
-
-def _model_versions(backends: Backends) -> dict[str, str]:
-    """Model version reported by each backend the job created."""
-    return {kind: b.model_version for kind, b in _created(backends).items()}
-
-
-def _run_file(
+def _start_file(
     file: InputFile,
     config: JobConfig,
     store: ArtifactStore,
     backends: Backends,
     modes: tuple[TranscriptMode, ...],
-    stages: list[Stage],
-    hashes: dict[Stage, str],
-    logger: RunLogger,
-    progress: ProgressCallback,
-    metrics: MetricsRecorder,
-    summary: JobSummary,
-) -> FileOutcome:
-    file_id = file.file_id
-    status = store.read_status(file_id)
+) -> _FileRun:
+    """A file's run state: its saved status (failures from earlier runs cleared)."""
+    status = store.read_status(file.file_id)
     if status is None or status.input_hash != file.content_hash:
-        status = FileStatus(file_id=file_id, input_hash=file.content_hash)
-    status = _clear_failure(status)
+        status = FileStatus(file_id=file.file_id, input_hash=file.content_hash)
     ctx = StageContext(
-        config=config, store=store, backends=backends, file_id=file_id, path=file.path,
+        config=config, store=store, backends=backends, file_id=file.file_id, path=file.path,
         input_hash=file.content_hash, modes=modes,
     )  # fmt: skip
-    ran: set[Stage] = set()
-    last_waveform_stage = next((s for s in reversed(stages) if s in WAVEFORM_STAGES), None)
+    return _FileRun(file=file, status=_clear_failure(status), ctx=ctx)
 
-    for stage in stages:
-        if config.stages.resume and _is_complete(stage, status, hashes, store, modes, ran):
-            progress.on_stage_end(file_id, stage, StageStatus.SKIPPED, 0.0)
-            if stage is last_waveform_stage:
-                ctx.release_waveform()
-            continue
 
-        progress.on_stage_start(file_id, stage)
+@dataclass
+class _Step:
+    """Runs one stage for one file: skip if complete, else run and record the result."""
+
+    config: JobConfig
+    store: ArtifactStore
+    pool: _BackendPool
+    modes: tuple[TranscriptMode, ...]
+    stages: list[Stage]
+    hashes: dict[Stage, str]
+    logger: RunLogger
+    progress: ProgressCallback
+    metrics: MetricsRecorder
+    summary: JobSummary
+
+    def run(self, run: _FileRun, stage: Stage) -> bool:
+        """Returns False if the stage failed (the file then skips the rest of the job)."""
+        file_id = run.file.file_id
+        if self.config.stages.resume and _is_complete(
+            stage, run.status, self.hashes, self.store, self.modes, run.ran
+        ):
+            self.progress.on_stage_end(file_id, stage, StageStatus.SKIPPED, 0.0)
+            return True
+
+        self.progress.on_stage_start(file_id, stage)
+        upstream_done = all(run.status.stages[dep] is StageStatus.DONE for dep in DEPENDS[stage])
+        if upstream_done:
+            self.pool.ensure(stage)  # outside the timing: model loading is not stage work
         error_code: str | None = None
-        with_timing = metrics.timed(file_id, stage)
         try:
-            with with_timing:
-                if any(status.stages[dep] is not StageStatus.DONE for dep in DEPENDS[stage]):
+            with self.metrics.timed(file_id, stage):
+                if not upstream_done:
                     raise PipelineError(MISSING_UPSTREAM)
-                STAGE_FUNCTIONS[stage](ctx)
+                STAGE_FUNCTIONS[stage](run.ctx)
         except Exception as exc:
-            error_code = logger.exception(exc, stage=stage, file_id=file_id)
-        duration = metrics.metrics.files[file_id][stage].duration_s
+            error_code = self.logger.exception(exc, stage=stage, file_id=file_id)
+        duration = self.metrics.metrics.files[file_id][stage].duration_s
 
         if error_code is not None:
-            status = _mark_failed(status, stage, stages, error_code)
-            store.write_status(status)
-            progress.on_stage_end(file_id, stage, StageStatus.FAILED, duration)
-            summary.failed.append(FileFailure(file_id, stage, error_code))
-            return FileOutcome.FAILED
+            run.status = _mark_failed(run.status, stage, self.stages, error_code)
+            self.store.write_status(run.status)
+            self.progress.on_stage_end(file_id, stage, StageStatus.FAILED, duration)
+            self.summary.failed.append(FileFailure(file_id, stage, error_code))
+            run.failed = True
+            return False
 
-        status = _mark_done(status, stage, hashes[stage])
-        store.write_status(status)
-        ran.add(stage)
-        progress.on_stage_end(file_id, stage, StageStatus.DONE, duration)
-        if stage is last_waveform_stage:
-            ctx.release_waveform()
-
-    if ran:
-        summary.done.append(file_id)
-        return FileOutcome.DONE
-    summary.skipped.append(file_id)
-    return FileOutcome.SKIPPED
+        run.status = _mark_done(run.status, stage, self.hashes[stage])
+        self.store.write_status(run.status)
+        run.ran.add(stage)
+        self.progress.on_stage_end(file_id, stage, StageStatus.DONE, duration)
+        return True
 
 
 def _is_complete(

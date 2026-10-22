@@ -109,6 +109,9 @@ class TorchcodecAudioLoader:
             return invalid(IngestErrorCode.TRUNCATED, **found)
         return ValidationResult(file_id=file_id, path=str(path), format=fmt, valid=True, **found)
 
+    def close(self) -> None:
+        """Nothing to release: decoders are opened and closed per call."""
+
     def load(self, path: Path, file_id: str) -> Waveform:
         """Decode a whole file into a 16 kHz mono float32 waveform in memory.
 

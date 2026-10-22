@@ -48,7 +48,27 @@ PER_MODE_STAGES = frozenset({Stage.TRANSCRIBE, Stage.ASSIGN_SPEAKERS, Stage.DETE
 """Stages that write one artifact per transcript mode (as the artifact variant)."""
 
 WAVEFORM_STAGES = frozenset({Stage.LOAD_AUDIO, Stage.DIARIZE, Stage.TRANSCRIBE})
-"""Stages that use the decoded waveform. It is freed after the last of them in a run."""
+"""Stages that use the decoded waveform."""
+
+STAGE_GROUPS: tuple[tuple[str, tuple[Stage, ...]], ...] = (
+    ("ingest", (Stage.INGEST,)),
+    ("audio", (Stage.LOAD_AUDIO, Stage.DIARIZE, Stage.TRANSCRIBE)),
+    ("assign_speakers", (Stage.ASSIGN_SPEAKERS,)),
+    ("detect_phi", (Stage.DETECT_PHI,)),
+)
+"""Named stage groups, in order (D21). The runner finishes a group for every file before
+starting the next. Within a group, each file runs all the group's stages before the next
+file, so audio is decoded once per file and freed before the next file is decoded."""
+
+
+def stage_groups(stages: list[Stage]) -> list[tuple[str, list[Stage]]]:
+    """The groups with stages in ``stages``, each limited to those stages, in order."""
+    groups = []
+    for name, members in STAGE_GROUPS:
+        selected = [s for s in members if s in stages]
+        if selected:
+            groups.append((name, selected))
+    return groups
 
 
 @dataclass

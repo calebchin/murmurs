@@ -119,6 +119,18 @@ class NemotronDiarizer:
             raise PipelineError(DIARIZATION_FAILED) from None
         return Diarization(file_id=file_id, turns=segments_to_turns(segments, self.num_speakers))
 
+    def close(self) -> None:
+        """Drop the model and return its GPU memory to the device."""
+        import gc
+
+        import torch
+
+        self._model = None
+        self._processor = None
+        gc.collect()
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+
 
 if TYPE_CHECKING:
     from murmurs.backends import Diarizer

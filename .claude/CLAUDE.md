@@ -13,7 +13,7 @@ The data is sensitive participant interview audio. Treat every transcript, promp
 1. **No transcript content in logs.** Logs, exceptions, error messages, progress output and crash reports must never contain transcript text, words, LLM prompts or LLM responses. Log only IDs, counts, durations, stage names and file hashes. Use the logging helpers in `murmurs.logging`; never call `print` or log raw objects that may hold text.
 2. **Never modify inputs.** Never write to, move, rename, convert or delete files in the input directory. All outputs go under the configured output directory.
 3. **The original transcript is immutable.** Redactions and edits live in a separate layer; the clean transcript is rendered from original + layer.
-4. **No network calls with interview data.** Everything runs locally. Network access is allowed only for installing packages and downloading model weights.
+4. **No network calls with interview data.** Everything runs locally. Network access is allowed only for installing packages and downloading model weights. Local processes (such as the vLLM server) are reached only over Unix domain sockets, which stay within the operating system; never over TCP, not even loopback.
 5. **No intermediate audio files.** Audio is decoded into memory once; do not write converted or chunked audio to disk.
 6. **Stay in scope.** Implement only the current task. Do not add features from "Deferred to later versions" or "Non-goals" in the design doc, and do not refactor code outside the task's listed files without asking.
 7. **Stop on open questions.** If a task touches anything in the design doc's "Open questions" list, or the design doc is silent or ambiguous, stop and ask. Do not pick an answer yourself.

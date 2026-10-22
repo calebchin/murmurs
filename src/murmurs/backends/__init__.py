@@ -2,7 +2,8 @@
 
 Pipeline code depends only on the protocols here. Each method takes and returns types
 from ``murmurs.models``, ``Waveform`` or plain Python types, never model-library types.
-Backends raise ``murmurs.errors.PipelineError`` for per-file failures.
+Backends raise ``murmurs.errors.PipelineError`` for per-file failures. The runner calls
+``close`` once a backend is no longer needed in a job (D21).
 """
 
 from __future__ import annotations
@@ -48,6 +49,10 @@ class AudioLoader(Protocol):
         """Decode a whole file into a 16 kHz mono waveform in memory."""
         ...
 
+    def close(self) -> None:
+        """Release the backend's resources (GPU memory, threads, processes). Not used after."""
+        ...
+
 
 @runtime_checkable
 class Diarizer(Protocol):
@@ -57,6 +62,10 @@ class Diarizer(Protocol):
 
     def diarize(self, waveform: Waveform, file_id: str) -> Diarization:
         """Return speaker turns for the whole recording, in time order."""
+        ...
+
+    def close(self) -> None:
+        """Release the backend's resources (GPU memory, threads, processes). Not used after."""
         ...
 
 
@@ -72,6 +81,10 @@ class Transcriber(Protocol):
         """Return one transcript per requested mode."""
         ...
 
+    def close(self) -> None:
+        """Release the backend's resources (GPU memory, threads, processes). Not used after."""
+        ...
+
 
 @runtime_checkable
 class NERDetector(Protocol):
@@ -81,6 +94,10 @@ class NERDetector(Protocol):
 
     def detect(self, text: str, file_id: str) -> list[RedactionSpan]:
         """Return spans over ``text`` with the model's raw label as ``entity_type``."""
+        ...
+
+    def close(self) -> None:
+        """Release the backend's resources (GPU memory, threads, processes). Not used after."""
         ...
 
 
@@ -94,6 +111,10 @@ class LLMClient(Protocol):
         self, prompt: str, response_model: type[M], file_id: str, system: str | None = None
     ) -> M:
         """Run ``prompt`` and return the response validated as ``response_model``."""
+        ...
+
+    def close(self) -> None:
+        """Release the backend's resources (GPU memory, threads, processes). Not used after."""
         ...
 
 

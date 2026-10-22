@@ -32,12 +32,13 @@ The design doc was silent or had an open question on each item below. Tasks that
 | D17 | **CrisperWhisper weights and the CTranslate2 conversion.** CrisperWhisper downloads Hugging Face-format weights (`nyralabs/CrisperWhisper2.0_large`, 3.1 GB, not gated) and converts them to CTranslate2 format on first load (about 32 s, offline, about 2.9 GB written to `~/.cache/crisperwhisper` or `$CRISPERWHISPER_CACHE`). Given a folder that already holds a converted model, it loads it directly and never touches the Hugging Face cache. | The conversion happens at download time: a registry entry may declare a prepare step that `murmurs models download` runs after downloading, plus a check of its output. `models check` and the runner's setup check treat an unprepared model as missing (exit code 2). Runs load the converted folder directly. Converted models stay in CrisperWhisper's cache. | P2-00, P2-04 |
 | D18 | **Transcript text source.** CrisperWhisper's full `text` contains repetition loops at its 26 s chunk seams that its timed word list leaves out (on a 53-minute podcast: 674 of 10,906 verbatim tokens in 7 blocks; 46 of 9,578 intended). Every timed word appears in the text. | Transcripts are built from the timed words only; segment text is its words joined with spaces. The model's `text` is discarded. | P2-04 |
 | D19 | **Segments.** CrisperWhisper returns overlapping 30 s chunks and a flat word list, not segments. | A new segment starts after a word ending in `.`, `?` or `!`, or when the gap to the next word is at least 1 s. P2-05 regroups segments by speaker later. | P2-04 |
+| D21 | **Runner order.** Phase 1's runner takes each file through every stage before starting the next file, so GPU models (including the LLM) would be loaded together or reloaded per file. | The runner processes **stage groups**, each across all files before the next group starts: (1) `ingest`; (2) `load_audio`, `diarize`, `transcribe` run per file within the group, so each file is decoded once and its waveform freed before the next (hard rule 5); (3) `assign_speakers`; (4) `detect_phi`. Each backend is created just before the first stage in the run that uses it and closed right after the last, so the audio models and the LLM are never loaded at the same time, and the LLM stays loaded across groups 3 and 4. | P2-05b, P2-06, P2-07 |
+| D6 | **How GPT-OSS 120B is served.** | A vLLM OpenAI-compatible server, installed in its own environment (vLLM pins an exact torch version, which must not dictate the pipeline's). murmurs starts it before the first stage in the run that uses the LLM and stops it after the last (D21), including on Ctrl-C and errors. It listens only on a Unix domain socket (`vllm serve --uds <path>`, available in vLLM 0.31.0); the client connects only through that socket and never over TCP, including loopback. A Unix socket counts as local under hard rule 4 because all communication stays within the local operating system. The server runs with usage statistics off, Hugging Face offline mode on, the tokenizer vocabulary pre-fetched, request logging off, and its stdout/stderr discarded so prompts cannot reach any log. GPU memory is not shared with the audio models (D21). The smaller fallback model remains a design open question. | P2-06, P2-07, CLAUDE.md rule 4 |
 
 ### Open
 
 | ID | Question | Blocks |
 | --- | --- | --- |
-| D6 | **How GPT-OSS 120B is served.** In-process (e.g. `transformers`, `vllm` offline mode) or a local server (vLLM, llama.cpp) on `localhost`? Hard rule 4 forbids network calls with interview data; does a loopback-only connection count? Also tied to the design open question on target hardware and a smaller fallback model. Constraint from D11: whichever option is chosen must start and run with no network connection, including any tokenizer vocabulary it fetches on first use. | P2-06, P2-07 |
 | D7 | **Default for `diarization.llm_correction`.** The schema defaults it to `true`, so a default phase 2 run needs GPT-OSS 120B loaded. Keep that default, or default to `false` until the LLM is set up? | P2-07 |
 | D8 | **Evaluation set form and authorship.** Text transcripts only, or also synthetic audio (e.g. TTS) to test the full pipeline? Who writes the interviews: the project owner, an LLM run locally, or both? How many CECA and LEDS interviews make the set "complete"? | P2-09 |
 | D9 | **What ground-truth offsets point into.** Redaction spans use character offsets, but the design does not define which text: the intended or verbatim transcript, and which plain-text rendering (with or without speaker labels and timestamps). Phase 3 will use the same answer. | P2-08, P2-09 |
@@ -208,14 +209,45 @@ The design doc was silent or had an open question on each item below. Tasks that
 
 ---
 
+## P2-05b: Stage-group runner
+
+**Goal:** the runner completes each stage group across all files before starting the next, and keeps each model in memory only while a stage that uses it runs (D21).
+
+**Depends on:** D21 (resolved).
+
+**Scope** (in `murmurs.runner`, `murmurs.stages`, `murmurs.backends`)
+- Stage groups, in order: `ingest`; `load_audio` + `diarize` + `transcribe`; `assign_speakers`; `detect_phi`. Only the stages in `stages.start`..`stages.end` run. Within the audio group, each file runs all its audio stages before the next file, so audio is decoded once per file (hard rule 5) and the waveform is freed before the next file is decoded.
+- Per-file run state (status, stages run in this job, stage context) persists across groups. Resume, skip and dependency rules are unchanged: a stage is skipped when complete with the same config hash and none of its dependencies ran again in this job.
+- A file that fails a stage is skipped for every later stage and group, with the same status and summary as today.
+- Backend lifetime: each backend is created just before the first stage in the run that uses it and closed right after the last such stage. Add a `close()` method to every backend protocol that releases its resources (GPU memory, the CrisperWhisper thread); stubs implement it as a no-op that records the call. The runner never closes backends passed in by the caller.
+- Setup checks (config, inputs, cached and prepared weights) still run before any file is processed. A backend that fails to load later, when its group starts, stops the job with exit code 2; completed stages are kept so a rerun resumes.
+- Ctrl-C between or within groups keeps completed stages; a rerun resumes.
+- Progress: `stage_start`/`stage_end` per file as today, plus `group_start`/`group_end` events with the group's stages and file count. `file_done` fires when a file finishes its last stage in the run or fails.
+- Update `docs/design.md` (pipeline and runner description) to match.
+
+**Out of scope:** running LLM requests for several files concurrently, multiple worker processes (`compute.parallel_workers`), the vLLM server (P2-06).
+
+**Acceptance criteria**
+- With stub backends and three files, every file finishes a group before any file starts the next group; within the audio group, each file's `load_audio`, `diarize` and `transcribe` run consecutively.
+- Each backend is created immediately before its first stage and closed immediately after its last; the audio backends are closed before the NER backend is created; no two groups' backends are open at once except a backend used by both.
+- A stage range that skips a group creates none of that group's backends.
+- A file that fails ingest, and a file that fails transcription, are skipped for all later stages; other files complete; exit code 1.
+- A backend whose factory raises when its group starts stops the job with exit code 2; stages completed before it are kept and a rerun skips them.
+- Ctrl-C during the `assign_speakers` group, then a rerun: no audio stage runs again and every file completes.
+- The waveform is decoded once per file per run and is freed before the next file is decoded.
+- Existing resume, sample-run, duplicate and sentinel tests pass.
+
+---
+
 ## P2-06: Local LLM backend
 
 **Goal:** a working `LLMClient` for GPT-OSS 120B that runs entirely on the local machine.
 
-**Depends on:** D6.
+**Depends on:** D6, D21 (resolved), P2-05b.
 
 **Scope** (in `murmurs.backends`)
-- `LLMClient` implementation for GPT-OSS 120B, served per D6.
+- `LLMClient` implementation for GPT-OSS 120B, served per D6: a vLLM server in its own environment, reached only over a Unix domain socket. Its `close()` (P2-05b) stops the server.
+- Server environment: how it is installed and pinned (a vLLM version at least two weeks old), and how `murmurs models download` prepares it, decided and reported before building on it. The pipeline environment must not depend on vLLM.
 - Structured output: callers pass a pydantic model and get a validated instance back. Invalid output is retried a bounded number of times, then raises a typed pipeline error with a code, never the response text.
 - Setup check: if the model cannot be loaded or reached, fail at setup with exit code 2.
 - Declare everything the model needs for P2-00, including tokenizer vocabulary files fetched on first use (GPT-OSS's `openai-harmony` encoding is believed to download its vocabulary separately; vLLM documents `TIKTOKEN_ENCODINGS_BASE` for offline use). Confirm the model starts with no network.
@@ -228,7 +260,8 @@ The design doc was silent or had an open question on each item below. Tasks that
 - The stub `LLMClient` satisfies the protocol and returns deterministic structured output.
 - Invalid structured output triggers retries, then a typed error whose message has no response content.
 - Sentinel test: a prompt and response containing the sentinel never leak to logs.
-- If served over a socket per D6, a test asserts the client refuses any host that is not loopback.
+- The client refuses any address that is not a Unix socket path (no TCP, not even loopback).
+- The server is stopped when the job ends, including on Ctrl-C and when a stage fails, and its output never reaches murmurs logs.
 - `@pytest.mark.gpu`: a trivial structured request returns a valid object, with offline mode forced and the network guard active.
 
 ---

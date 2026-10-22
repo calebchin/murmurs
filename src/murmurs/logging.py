@@ -42,6 +42,7 @@ ALLOWED_FIELDS = frozenset(
         "file_id",
         "input_hash",
         "stage",
+        "group",
         "status",
         "error_code",
         "exception_type",

@@ -43,7 +43,7 @@ The core pipeline is a Python library; the first release is a single-user deskto
 - **Library:** all pipeline logic, with no UI or server assumptions.
 - **CLI:** runs jobs from a config file.
 - **GUI:** a local web app over the same library, possibly a native desktop app later.
-- **Where models run:** STT, diarization and LLM models run on the user's machine, or on a local server workstation if installed there. No data leaves that machine.
+- **Where models run:** STT, diarization and LLM models run on the user's machine, or on a local server workstation if installed there. No data leaves that machine. The LLM runs in a local vLLM server process in its own environment, started and stopped by the pipeline and reached only over a Unix domain socket.
 - **Offline operation:** after a one-time setup step done while connected (install packages, download all model weights), the pipeline runs with no network connection at all. See Operations and packaging.
 
 Starting single-user avoids authentication and multi-user security work in the first version.
@@ -92,6 +92,8 @@ Each transcript has a review state: unreviewed → in progress → complete → 
 ## Pipeline stages
 
 The pipeline has seven stages with defined inputs and outputs, so any range of stages can be run, cached and resumed. No chunked audio files are written: CrisperWhisper handles long audio internally, and both models read the same in-memory waveform.
+
+The runner works in stage groups, finishing each group for every file before starting the next: ingest; audio (loading, diarization and transcription, run file by file so each file is decoded once and its waveform freed before the next); speaker assignment; PHI detection. Each model is loaded just before the first stage that actually runs with it and released after the last group that uses it, so the audio models and the LLM never hold GPU memory at the same time, and the LLM stays loaded from speaker assignment through PHI detection.
 
 | # | Stage | Input | Output | Method |
 | --- | --- | --- | --- | --- |

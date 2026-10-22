@@ -105,9 +105,14 @@ def test_interrupted_job_leaves_manifest_unfinished(stub_job: StubJob) -> None:
         run_job(config, "job", backends=backends, console=io.StringIO())
     manifest = _manifest(config, "job")
     assert manifest.finished_at is None
-    [status] = manifest.file_statuses
-    assert status.stages[Stage.LOAD_AUDIO] is StageStatus.DONE
-    assert status.stages[Stage.TRANSCRIBE] is StageStatus.PENDING
+    # Stage groups (D21): every file was ingested before the first transcription.
+    assert len(manifest.file_statuses) == 3
+    assert all(s.stages[Stage.INGEST] is StageStatus.DONE for s in manifest.file_statuses)
+    interrupted = [
+        s for s in manifest.file_statuses if s.stages[Stage.LOAD_AUDIO] is StageStatus.DONE
+    ]
+    assert len(interrupted) == 1
+    assert interrupted[0].stages[Stage.TRANSCRIBE] is StageStatus.PENDING
 
 
 def test_manifest_never_contains_sentinel(stub_job: StubJob) -> None:

@@ -231,6 +231,7 @@ class CrisperWhisperTranscriber:
         """``device_fallback`` is true when ``auto`` found no CUDA device; the runner logs it."""
         self.compute_type = STORED_PRECISION if self.device == "cuda" else "float32"
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="crisperwhisper")
+        self._closed = False
         try:
             self._model = self._executor.submit(
                 load_model, model_dir, self.device, self.compute_type
@@ -258,6 +259,23 @@ class CrisperWhisperTranscriber:
             for name, words in raw.items()
             if name in names
         }
+
+    def close(self) -> None:
+        """Drop the model on its own thread (where it was created), then stop the thread."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._executor.submit(self._drop_model).result()
+        finally:
+            self._executor.shutdown(wait=True)
+
+    def _drop_model(self) -> None:
+        """Runs on the dedicated thread."""
+        import gc
+
+        self._model = None
+        gc.collect()
 
     def _run(self, samples: Any, modes: tuple[str, ...]) -> Mapping[str, list[RawWord]]:
         """Runs on the dedicated thread."""

@@ -51,6 +51,11 @@ class _Stub:
         self.interrupt_pending = set(interrupt_once)
         """File IDs that raise ``KeyboardInterrupt`` on their first call (simulates Ctrl-C)."""
         self.calls: list[str] = []
+        self.close_calls = 0
+
+    def close(self) -> None:
+        """Nothing to release; counts calls so tests can check backend lifetimes."""
+        self.close_calls += 1
 
     def _record(self, file_id: str) -> None:
         self.calls.append(file_id)
