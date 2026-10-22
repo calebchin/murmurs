@@ -1,13 +1,12 @@
 """Pipeline stages.
 
 Each stage reads its inputs and writes its artifacts through the artifact store, and
-calls models only through ``murmurs.backends`` protocols. ``assign_speakers`` and
-``detect_phi`` are phase 1 placeholders, replaced in P2-05 and phase 3.
+calls models only through ``murmurs.backends`` protocols. ``detect_phi`` is a phase 1
+placeholder, replaced in phase 3.
 """
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,17 +18,14 @@ from murmurs.backends import AudioLoader, Diarizer, NERDetector, Transcriber, Wa
 from murmurs.config import JobConfig, Stage
 from murmurs.errors import PipelineError
 from murmurs.models import (
-    UNKNOWN_SPEAKER,
     AudioInfo,
     Diarization,
     RedactionLayer,
-    Segment,
-    SpeakerTurn,
     Transcript,
     TranscriptMode,
     TranscriptRef,
-    Word,
 )
+from murmurs.stages.assign import assign_speakers as assign_words
 from murmurs.store import ArtifactStore
 
 M = TypeVar("M", bound=BaseModel)
@@ -164,11 +160,16 @@ def transcribe(ctx: StageContext) -> None:
 
 
 def assign_speakers(ctx: StageContext) -> None:
-    """Label words with speakers. Placeholder until P2-05: midpoint lookup, no regrouping."""
+    """Label every word with a speaker and regroup words into speaker segments.
+
+    Every transcript mode uses the same speaker turns, so words at the same times get
+    the same speaker in each mode.
+    """
     turns = ctx.read(Stage.DIARIZE, Diarization).turns
+    tolerance = ctx.config.diarization.speaker_gap_tolerance_s
     for mode in ctx.modes:
         transcript = ctx.read(Stage.TRANSCRIBE, Transcript, variant=mode.value)
-        labeled = _label_by_midpoint(transcript, turns)
+        labeled = assign_words(transcript, turns, tolerance)
         ctx.store.write(ctx.file_id, Stage.ASSIGN_SPEAKERS, labeled, variant=mode.value)
         ctx.store.write_transcript_text(
             ctx.file_id, Stage.ASSIGN_SPEAKERS, labeled, variant=mode.value
@@ -206,36 +207,3 @@ def _need(backend: B | None) -> B:
     if backend is None:
         raise RuntimeError("backend required by this stage was not created")
     return backend
-
-
-def _speaker_at(time: float, turns: list[SpeakerTurn]) -> str:
-    for turn in turns:
-        if turn.start <= time <= turn.end:
-            return turn.speaker
-    return UNKNOWN_SPEAKER
-
-
-def _label_by_midpoint(transcript: Transcript, turns: list[SpeakerTurn]) -> Transcript:
-    segments = []
-    for segment in transcript.segments:
-        words = [
-            Word(
-                text=w.text,
-                start=w.start,
-                end=w.end,
-                speaker=_speaker_at((w.start + w.end) / 2, turns),
-            )
-            for w in segment.words
-        ]
-        counts = Counter(w.speaker for w in words)
-        speaker = counts.most_common(1)[0][0] if words else UNKNOWN_SPEAKER
-        segments.append(
-            Segment(
-                speaker=speaker,
-                start=segment.start,
-                end=segment.end,
-                text=segment.text,
-                words=words,
-            )
-        )
-    return Transcript(file_id=transcript.file_id, mode=transcript.mode, segments=segments)

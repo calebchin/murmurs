@@ -41,6 +41,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 | D7 | **Default for `diarization.llm_correction`.** The schema defaults it to `true`, so a default phase 2 run needs GPT-OSS 120B loaded. Keep that default, or default to `false` until the LLM is set up? | P2-07 |
 | D8 | **Evaluation set form and authorship.** Text transcripts only, or also synthetic audio (e.g. TTS) to test the full pipeline? Who writes the interviews: the project owner, an LLM run locally, or both? How many CECA and LEDS interviews make the set "complete"? | P2-09 |
 | D9 | **What ground-truth offsets point into.** Redaction spans use character offsets, but the design does not define which text: the intended or verbatim transcript, and which plain-text rendering (with or without speaker labels and timestamps). Phase 3 will use the same answer. | P2-08, P2-09 |
+| D20 | **Diarization/word-timing lag.** On the 53-minute podcast, Nemotron's speaker changes trail CrisperWhisper's word times by about 0.1 s (median 0.08 s, one Nemotron encoder frame), so 29–34 of 243 speaker changes leave a sentence-opening word with the previous speaker. Shifting turns 0.08–0.12 s earlier before assignment removed about two-thirds of these (34 → 11–14) and halved the opposite error (10 → 4); larger shifts made things worse. Add a `diarization.turn_offset_s` config field (and with what default, tuned on which audio), rely on the P2-07 LLM pass, or both? Needs interview audio to tune. | P2-05 follow-up, P2-07 |
 | D10 | **Evaluation tag set.** The data owners set the deidentification standard. Which entity types (and NER label mappings) do ground-truth labels use? Related to the design open question on NER label actions. | P2-09 |
 
 ---
@@ -266,6 +267,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 **Scope**
 - A sample run (`sample.enabled`, from P1-09) with real backends ends at `assign_speakers` by default and writes a reviewer folder: `<output_dir>/<job_id>/review/<file_id>.txt` with speaker labels and timestamps, for each mode.
 - Define the canonical plain-text rendering of a transcript in one function, used by exports here and by ground-truth offsets in P2-09.
+- Word-level export: next to each transcript's `.txt`, write `<stage>.<mode>.words.tsv` through the artifact store, one word per line with a header row: `start`, `end`, `speaker`, `word` (times in seconds, 3 decimals; empty speaker before assignment). Written for both `transcribe` and `assign_speakers` outputs, and copied into the reviewer folder. This is a readable view of the JSON artifacts' word timings, not an SRT/VTT subtitle format (deferred).
 - Record throughput in `metrics.json`: audio duration, wall time per stage, and real-time factor per file and per job.
 - Record hardware in the manifest: GPU name and memory, CPU count, backend chosen.
 - A short reviewer checklist in `docs/review-checklist.md` (speaker labels, missing or hallucinated speech, timestamps), used for the phase sign-off.
@@ -275,6 +277,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 **Acceptance criteria**
 - A stub sample run writes one review file per selected file and mode, and none for unselected files.
 - The rendering function is deterministic and covered by a snapshot test.
+- The word-level TSV has one row per word in transcript order, its times and speakers match the JSON artifact exactly (to 3 decimals), and words containing tabs or newlines cannot break the format.
 - `metrics.json` contains audio duration and real-time factor for every completed file.
 - The sentinel never appears in metrics or the manifest (review files are transcripts and may contain it).
 
