@@ -5,8 +5,10 @@ when this module is imported, so importing the registry stays cheap.
 
 The probe reads only container headers plus two short windows of audio at the start
 and end of the stream; it never decodes a whole file. Library exceptions are mapped to
-fixed ``IngestErrorCode`` values and their text is discarded, since it can quote paths
-or file contents.
+fixed error codes and their text is discarded, since it can quote paths or file contents.
+
+``load`` decodes straight from the original file into memory; no audio is ever written
+to disk, including the temp directory.
 """
 
 from __future__ import annotations
@@ -16,9 +18,19 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from murmurs.backends import Waveform
-from murmurs.backends.stubs import StubAudioLoader
+from murmurs.errors import PipelineError
 from murmurs.models import ErrorInfo, IngestErrorCode, ValidationResult
+
+TARGET_SAMPLE_RATE = 16_000
+"""Sample rate of every decoded waveform; both diarization and transcription expect it."""
+
+DECODE_FAILED = "DECODE_FAILED"
+"""``load`` error code: the file could not be decoded."""
+NO_SAMPLES = "NO_SAMPLES"
+"""``load`` error code: the file decoded to zero samples."""
 
 PROBE_WINDOW_S = 0.5
 """Length of audio decoded at each end of the stream to detect corruption."""
@@ -28,17 +40,13 @@ _RIFF_UNKNOWN_SIZES = (0, 0xFFFFFFFF)
 
 
 class TorchcodecAudioLoader:
-    """Probes and decodes audio with ``torchcodec`` and the system ffmpeg.
-
-    ``load`` still returns the stub's silence; real decoding arrives in P2-02.
-    """
+    """Probes and decodes audio with ``torchcodec`` and the system ffmpeg."""
 
     def __init__(self, audio_extensions: Sequence[str]) -> None:
         import torchcodec
 
         self.model_version = f"torchcodec {torchcodec.__version__}"
         self.audio_extensions = frozenset(ext.lower() for ext in audio_extensions)
-        self._load_stub = StubAudioLoader()
 
     def probe(self, path: Path, file_id: str) -> ValidationResult:
         """Check a file's format and integrity without decoding all of it.
@@ -102,8 +110,24 @@ class TorchcodecAudioLoader:
         return ValidationResult(file_id=file_id, path=str(path), format=fmt, valid=True, **found)
 
     def load(self, path: Path, file_id: str) -> Waveform:
-        """Placeholder until P2-02: the stub loader's silence."""
-        return self._load_stub.load(path, file_id)
+        """Decode a whole file into a 16 kHz mono float32 waveform in memory.
+
+        torchcodec resamples while decoding and keeps the source channels; channels are
+        then averaged here (ffmpeg's own downmix scales stereo up by about 1.41).
+        """
+        from torchcodec.decoders import AudioDecoder
+
+        try:
+            decoded = AudioDecoder(path, sample_rate=TARGET_SAMPLE_RATE).get_all_samples()
+        except Exception:
+            raise PipelineError(DECODE_FAILED) from None
+        channels = decoded.data.numpy()
+        if channels.ndim != 2 or channels.shape[1] == 0:
+            raise PipelineError(NO_SAMPLES)
+        mono = channels[0] if channels.shape[0] == 1 else channels.mean(axis=0, dtype=np.float32)
+        return Waveform(
+            samples=np.ascontiguousarray(mono, dtype=np.float32), sample_rate=TARGET_SAMPLE_RATE
+        )
 
 
 def _decodes(decoder: Any, start_s: float, stop_s: float) -> bool:

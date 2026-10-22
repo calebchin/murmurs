@@ -84,7 +84,9 @@ def _examples() -> list[BaseModel]:
         ValidationResult(
             file_id="f2", path="in/b.wav", valid=False, error=ErrorInfo(code="UNREADABLE")
         ),
-        AudioInfo(file_id="f1", sample_rate=16000, n_samples=32000, duration_s=2.0),
+        AudioInfo(
+            file_id="f1", input_hash="abc", sample_rate=16000, n_samples=32000, duration_s=2.0
+        ),
         Diarization(file_id="f1", turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=1.0)]),
         _transcript(),
         RedactionLayer(
@@ -131,7 +133,7 @@ def test_examples_cover_every_top_level_artifact() -> None:
 
 @pytest.mark.parametrize("model", TOP_LEVEL_ARTIFACTS, ids=lambda m: m.__name__)
 def test_top_level_artifacts_carry_schema_version(model: type[BaseModel]) -> None:
-    expected = 2 if model in (FileStatus, ValidationResult) else 1
+    expected = 2 if model in (FileStatus, ValidationResult, AudioInfo) else 1
     assert model.model_fields["schema_version"].default == expected
 
 

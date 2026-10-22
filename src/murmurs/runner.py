@@ -34,6 +34,7 @@ from murmurs.stages import (
     DEPENDS,
     MISSING_UPSTREAM,
     STAGE_FUNCTIONS,
+    WAVEFORM_STAGES,
     Backends,
     StageContext,
     stage_config,
@@ -344,13 +345,16 @@ def _run_file(
     status = _clear_failure(status)
     ctx = StageContext(
         config=config, store=store, backends=backends, file_id=file_id, path=file.path,
-        modes=modes,
+        input_hash=file.content_hash, modes=modes,
     )  # fmt: skip
     ran: set[Stage] = set()
+    last_waveform_stage = next((s for s in reversed(stages) if s in WAVEFORM_STAGES), None)
 
     for stage in stages:
         if config.stages.resume and _is_complete(stage, status, hashes, store, modes, ran):
             progress.on_stage_end(file_id, stage, StageStatus.SKIPPED, 0.0)
+            if stage is last_waveform_stage:
+                ctx.release_waveform()
             continue
 
         progress.on_stage_start(file_id, stage)
@@ -376,6 +380,8 @@ def _run_file(
         store.write_status(status)
         ran.add(stage)
         progress.on_stage_end(file_id, stage, StageStatus.DONE, duration)
+        if stage is last_waveform_stage:
+            ctx.release_waveform()
 
     if ran:
         summary.done.append(file_id)

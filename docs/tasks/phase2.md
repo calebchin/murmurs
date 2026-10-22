@@ -26,6 +26,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 | D11 | **Offline operation.** | The first deployment machine (the current dev machine) runs disconnected. Weights are downloaded on it while connected, then it goes offline. Runs force Hugging Face offline mode, never read `HF_TOKEN`, and fail at setup (exit code 2) if a required model is not cached. `HF_TOKEN` is used only by `murmurs models download`. Recorded in `docs/design.md` → Operations and packaging. | P2-00, P2-03, P2-04, P2-06, P2-10 |
 | D12 | **Stub test inputs once the real audio loader exists.** | The `stub_job` fixture in `tests/conftest.py` writes real tone audio (`tests/fixtures/audio.py`) instead of fake bytes, so tests that use the `"default"` audio loader run the real torchcodec loader on CPU. Moved to P2-01 by D13. | P2-01 |
 | D13 | **Where the real probe lives, and when `"default"` switches.** | The torchcodec code lives in `murmurs.backends` as a `TorchcodecAudioLoader`; the ingest flow stays in `murmurs.stages`. P2-01 adds the class with a real `probe`, whose `load` delegates to the stub loader until P2-02, and points the `"default"` audio loader at it. Because the real probe rejects fake bytes, the D12 fixture change happens in P2-01, not P2-02. | P2-01, P2-02 |
+| D14 | **Downmix to mono.** ffmpeg's built-in downmix (`num_channels=1`) is `(L + R) × 0.7071`, not a mean, so correlated stereo comes out about 1.41× louder and can exceed ±1. | torchcodec resamples to 16 kHz and keeps the source channels; the loader averages channels in numpy. Output stays in [−1, 1]. For multi-channel input, peak memory briefly holds every channel at 16 kHz (about 230 MB per hour per channel) while averaging. | P2-02 |
 
 ### Open
 
@@ -99,7 +100,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 **Depends on:** D1, D2 (resolved).
 
 **Scope**
-- Real `AudioLoader` backend using `torchcodec`: decode, downmix to mono, resample to 16 kHz, return a float32 numpy array plus sample rate. Use torchcodec's built-in resampling and downmixing (`AudioDecoder(..., sample_rate=16000, num_channels=1)`) if the installed version supports both; otherwise downmix in numpy and say so in the summary.
+- Real `AudioLoader` backend using `torchcodec`: decode, downmix to mono, resample to 16 kHz, return a float32 numpy array plus sample rate. Resample with torchcodec (`AudioDecoder(..., sample_rate=16000)`) and downmix by averaging channels in numpy (D14).
 - Decode from the original path straight into memory. No temporary or converted audio files anywhere, including the system temp directory.
 - `torchcodec` requires `torch`, and its versions must match torch's per the torchcodec compatibility table. Pin compatible versions; pyannote (P2-03) also depends on torch, so choose a torch version that suits both.
 - The waveform is not an artifact. The stage writes a small metadata artifact (sample count, duration, sample rate, input hash) so the runner can record completion.

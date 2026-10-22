@@ -105,10 +105,15 @@ class ValidationResult(_Model):
 
 
 class AudioInfo(_Model):
-    """Stage 2 output: facts about the decoded waveform. The audio itself is never saved."""
+    """Stage 2 output: facts about the decoded waveform. The audio itself is never saved.
 
-    schema_version: Literal[1] = 1
+    (Schema 2 added ``input_hash``.)
+    """
+
+    schema_version: Literal[2] = 2
     file_id: str
+    input_hash: str
+    """SHA-256 of the input file the waveform was decoded from."""
     sample_rate: int = Field(gt=0)
     n_samples: int = Field(ge=0)
     duration_s: float = Field(ge=0)

@@ -51,6 +51,9 @@ DEPENDS: dict[Stage, tuple[Stage, ...]] = {
 PER_MODE_STAGES = frozenset({Stage.TRANSCRIBE, Stage.ASSIGN_SPEAKERS, Stage.DETECT_PHI})
 """Stages that write one artifact per transcript mode (as the artifact variant)."""
 
+WAVEFORM_STAGES = frozenset({Stage.LOAD_AUDIO, Stage.DIARIZE, Stage.TRANSCRIBE})
+"""Stages that use the decoded waveform. It is freed after the last of them in a run."""
+
 
 @dataclass
 class Backends:
@@ -71,6 +74,7 @@ class StageContext:
     backends: Backends
     file_id: str
     path: Path
+    input_hash: str
     modes: tuple[TranscriptMode, ...]
     _waveform: Waveform | None = field(default=None, repr=False)
 
@@ -79,6 +83,10 @@ class StageContext:
         if self._waveform is None:
             self._waveform = _need(self.backends.audio_loader).load(self.path, self.file_id)
         return self._waveform
+
+    def release_waveform(self) -> None:
+        """Drop this context's reference to the decoded audio so its memory can be freed."""
+        self._waveform = None
 
     def read(self, stage: Stage, model: type[M], variant: str | None = None) -> M:
         """Read an upstream artifact; a missing one is a ``MISSING_UPSTREAM`` failure."""
@@ -129,6 +137,7 @@ def load_audio(ctx: StageContext) -> None:
     ctx._waveform = waveform
     info = AudioInfo(
         file_id=ctx.file_id,
+        input_hash=ctx.input_hash,
         sample_rate=waveform.sample_rate,
         n_samples=len(waveform.samples),
         duration_s=waveform.duration_s,
