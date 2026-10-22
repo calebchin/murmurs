@@ -1,6 +1,6 @@
 # Example murmurs job config. Every field is shown; omitted fields take the defaults
 # listed here. Print the full schema with: uv run murmurs config schema
-schema_version: 3
+schema_version: 4
 
 data:
   input_dir: /path/to/interview/audio
@@ -33,6 +33,10 @@ transcription:
 deid:
   ner_model: OpenMed/privacy-filter-nemotron-v2
   llm_model: openai/gpt-oss-120b
+  llm_server:                   # the local vLLM server (set up by `murmurs models download`)
+    gpu_memory_utilization: 0.85  # share of GPU memory vLLM may use
+    max_model_len: 32768          # longest prompt + response, in tokens
+    startup_timeout_s: 900        # give up if the server is not ready by then
   prompt_path: null
   redaction_threshold: 0.5
   flag_edge_cases: true

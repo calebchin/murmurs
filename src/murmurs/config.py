@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 """Newest config schema version this code reads. Older versions are migrated on load."""
 
 
@@ -152,11 +152,27 @@ class EntityType(_Model):
     action: EntityAction = EntityAction.REDACT
 
 
+class LLMServerConfig(_Model):
+    """Settings for the local vLLM server that runs the LLM (D22).
+
+    They affect speed and memory, not results, so they are not part of any stage's
+    config hash.
+    """
+
+    gpu_memory_utilization: float = Field(0.85, gt=0, le=1)
+    """Share of GPU memory vLLM may use for weights, activations and its KV cache."""
+    max_model_len: int = Field(32768, ge=1024)
+    """Longest prompt plus response, in tokens."""
+    startup_timeout_s: float = Field(900, gt=0)
+    """How long to wait for the server to become ready before the job stops."""
+
+
 class DeidConfig(_Model):
     """PHI detection settings."""
 
     ner_model: str = "OpenMed/privacy-filter-nemotron-v2"
     llm_model: str = "openai/gpt-oss-120b"
+    llm_server: LLMServerConfig = Field(default_factory=LLMServerConfig)
     entity_types: list[EntityType]
     prompt_path: Path | None = None
     redaction_threshold: float = Field(0.5, ge=0, le=1)
@@ -211,6 +227,7 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     # 2 -> 3 changed the diarization.model default, made num_speakers a cap and added
     # .mp3 to the default audio_extensions; the fields are unchanged, so there is
     # nothing to rewrite.
+    # 3 -> 4 added deid.llm_server, which has defaults.
     return {**raw, "schema_version": CURRENT_SCHEMA_VERSION}
 
 

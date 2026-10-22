@@ -63,6 +63,7 @@ Before finishing any task, run `uv run ruff check .`, `uv run ruff format --chec
 - Diarization uses `nvidia/Nemotron-3-Diarization` through `transformers` (5.18 or later; its feature extractor also needs `librosa`). It is not gated. Gated models (if any are added) need a token: only `murmurs models download` reads it, from the `HF_TOKEN` environment variable; runs load cached weights and never read it. Never hard-code or log the token.
 - The pipeline must run with no network connection. Real backends load weights from the local cache only and import model libraries lazily (inside the factory), never at import time of `murmurs.backends.registry`.
 - NER uses `OpenMed/privacy-filter-nemotron-v2`; LLM uses GPT-OSS 120B. Both run locally.
+- GPT-OSS runs in a vLLM server with its own environment, never installed into the pipeline's: its locked `pyproject.toml`/`uv.lock` ship in `src/murmurs/backends/vllm_server/`, and `murmurs models download` builds it under `~/.cache/murmurs/vllm-server/<lock hash>/` (or `$MURMURS_CACHE`). To change the vLLM version, edit that `pyproject.toml` and run `uv lock --project src/murmurs/backends/vllm_server`. The server listens only on a Unix socket and always runs with the network guard in `vllm_server/guard/sitecustomize.py`; never add a TCP option or remove the guard.
 - Do not add new dependencies without saying so in your summary and explaining why.
 
 ## How to work a task

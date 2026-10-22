@@ -195,6 +195,30 @@ class Transcript(_Frozen):
     segments: list[Segment]
 
 
+class SpeakerCorrection(_Model):
+    """Stage 5 report on the LLM speaker-correction pass (P2-07): counts only, no text.
+
+    Written whether or not correction ran (``enabled``), so toggling it never leaves a
+    stale report.
+    """
+
+    schema_version: Literal[1] = 1
+    file_id: str
+    enabled: bool
+    source_mode: TranscriptMode | None = None
+    """The mode the LLM corrected; the other mode was mapped by word time (D24)."""
+    n_chunks: int = Field(0, ge=0)
+    failed_chunks: int = Field(0, ge=0)
+    """Chunks whose LLM output stayed invalid after retries; they keep rule-based labels."""
+    proposed: int = Field(0, ge=0)
+    """Label changes the LLM proposed."""
+    applied: int = Field(0, ge=0)
+    rejected: dict[str, int] = {}
+    """Rejected changes by reason (e.g. ``"text_mismatch"``)."""
+    words_changed: dict[TranscriptMode, int] = {}
+    """Words whose speaker differs from the rule-based assignment, per mode."""
+
+
 # --- Redactions and review ------------------------------------------------------------
 
 
@@ -363,6 +387,7 @@ TOP_LEVEL_ARTIFACTS: tuple[type[BaseModel], ...] = (
     AudioInfo,
     Diarization,
     Transcript,
+    SpeakerCorrection,
     RedactionLayer,
     FileStatus,
     RunManifest,

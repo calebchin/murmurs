@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-from murmurs.backends import AudioLoader, Diarizer, NERDetector, Transcriber, registry
+from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber, registry
 from murmurs.backends.registry import BackendKind
 from murmurs.config import JobConfig, Stage
 from murmurs.errors import BackendSetupError, PipelineError, SetupError
@@ -175,18 +175,11 @@ def parse_modes(config: JobConfig) -> tuple[TranscriptMode, ...]:
     return modes
 
 
-def backend_kinds(stages: list[Stage]) -> set[BackendKind]:
+def backend_kinds(stages: list[Stage], config: JobConfig) -> set[BackendKind]:
     """The kinds of backend the given stages use."""
-    audio_stages = {Stage.INGEST, Stage.LOAD_AUDIO, Stage.DIARIZE, Stage.TRANSCRIBE}
-    kinds = set()
-    if audio_stages.intersection(stages):
-        kinds.add(BackendKind.AUDIO_LOADER)
-    if Stage.DIARIZE in stages:
-        kinds.add(BackendKind.DIARIZER)
-    if Stage.TRANSCRIBE in stages:
-        kinds.add(BackendKind.TRANSCRIBER)
-    if Stage.DETECT_PHI in stages:
-        kinds.add(BackendKind.NER)
+    kinds: set[BackendKind] = set()
+    for stage in stages:
+        kinds |= stage_backend_kinds(stage, config)
     return kinds
 
 
@@ -197,7 +190,7 @@ def check_weights(config: JobConfig, stages: list[Stage]) -> dict[str, str]:
     selected backend is not registered, ``MissingWeightsError`` if weights are missing,
     or ``UnpreparedModelError`` if a model built from them has not been prepared.
     """
-    plan = registry.required_weights(config, sorted(backend_kinds(stages)))
+    plan = registry.required_weights(config, sorted(backend_kinds(stages, config)))
     if plan.unavailable:
         raise BackendSetupError("; ".join(plan.unavailable))
     revisions = check_cached(plan.weights)
@@ -207,7 +200,7 @@ def check_weights(config: JobConfig, stages: list[Stage]) -> dict[str, str]:
 
 def create_backends(config: JobConfig, stages: list[Stage]) -> Backends:
     """Create only the backends the given stages use."""
-    kinds = backend_kinds(stages)
+    kinds = backend_kinds(stages, config)
     return Backends(
         audio_loader=(
             registry.create_audio_loader(config) if BackendKind.AUDIO_LOADER in kinds else None
@@ -217,10 +210,11 @@ def create_backends(config: JobConfig, stages: list[Stage]) -> Backends:
             registry.create_transcriber(config) if BackendKind.TRANSCRIBER in kinds else None
         ),
         ner=registry.create_ner_detector(config) if BackendKind.NER in kinds else None,
+        llm=registry.create_llm_client(config) if BackendKind.LLM in kinds else None,
     )
 
 
-def stage_backend_kinds(stage: Stage) -> set[BackendKind]:
+def stage_backend_kinds(stage: Stage, config: JobConfig) -> set[BackendKind]:
     """The kinds of backend one stage calls when it runs."""
     kinds = set()
     if stage is Stage.INGEST or stage in WAVEFORM_STAGES:
@@ -229,12 +223,14 @@ def stage_backend_kinds(stage: Stage) -> set[BackendKind]:
         kinds.add(BackendKind.DIARIZER)
     if stage is Stage.TRANSCRIBE:
         kinds.add(BackendKind.TRANSCRIBER)
+    if stage is Stage.ASSIGN_SPEAKERS and config.diarization.llm_correction:
+        kinds.add(BackendKind.LLM)
     if stage is Stage.DETECT_PHI:
         kinds.add(BackendKind.NER)
     return kinds
 
 
-AnyBackend = AudioLoader | Diarizer | Transcriber | NERDetector
+AnyBackend = AudioLoader | Diarizer | Transcriber | NERDetector | LLMClient
 
 
 def _create(kind: BackendKind, config: JobConfig) -> AnyBackend:
@@ -248,6 +244,8 @@ def _create(kind: BackendKind, config: JobConfig) -> AnyBackend:
             return registry.create_transcriber(config)
         case BackendKind.NER:
             return registry.create_ner_detector(config)
+        case BackendKind.LLM:
+            return registry.create_llm_client(config)
     raise ValueError(f"the runner does not manage {kind.value} backends")
 
 
@@ -256,6 +254,7 @@ MANAGED_KINDS = (
     BackendKind.DIARIZER,
     BackendKind.TRANSCRIBER,
     BackendKind.NER,
+    BackendKind.LLM,
 )
 """Kinds the runner creates and closes. Their values are attribute names on ``Backends``."""
 
@@ -283,7 +282,7 @@ class _BackendPool:
         self._last_group: dict[BackendKind, int] = {}
         for index, (_, stages) in enumerate(groups):
             for stage in stages:
-                for kind in stage_backend_kinds(stage):
+                for kind in stage_backend_kinds(stage, config):
                     self._last_group[kind] = index
         self.model_versions: dict[str, str] = {}
         if not self._owned:
@@ -300,7 +299,7 @@ class _BackendPool:
         """
         if not self._owned:
             return
-        for kind in sorted(stage_backend_kinds(stage)):
+        for kind in sorted(stage_backend_kinds(stage, self._config)):
             if getattr(self.backends, kind.value) is not None:
                 continue
             try:

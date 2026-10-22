@@ -7,6 +7,10 @@ import re
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
+LLM_INVALID_OUTPUT = "LLM_INVALID_OUTPUT"
+"""Error code an ``LLMClient`` raises when its output stays invalid after retries."""
+
+
 class PipelineError(Exception):
     """A failure processing one file, identified by a fixed error code.
 

@@ -33,6 +33,8 @@ from murmurs.backends.crisper import (
     crisperwhisper_prepared,
     crisperwhisper_weights,
 )
+from murmurs.backends.gptoss import MODEL_ID as GPT_OSS_ID
+from murmurs.backends.gptoss import create_gpt_oss, gpt_oss_prepared, gpt_oss_weights
 from murmurs.backends.nemotron import MODEL_ID as NEMOTRON_ID
 from murmurs.backends.nemotron import NemotronDiarizer, nemotron_weights
 from murmurs.backends.stubs import (
@@ -212,3 +214,10 @@ register(
 )
 register(BackendKind.NER, STUB, lambda _: StubNERDetector())
 register(BackendKind.LLM, STUB, lambda _: StubLLMClient())
+register(
+    BackendKind.LLM,
+    GPT_OSS_ID,
+    create_gpt_oss,
+    weights=gpt_oss_weights,
+    prepared=gpt_oss_prepared,
+)

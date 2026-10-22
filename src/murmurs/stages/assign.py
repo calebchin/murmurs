@@ -68,6 +68,11 @@ class _Turns:
         return self.turns[i].speaker if gap <= gap_tolerance_s else UNKNOWN_SPEAKER
 
 
+def words_of(transcript: Transcript) -> list[Word]:
+    """Every word of a transcript, in order."""
+    return [word for segment in transcript.segments for word in segment.words]
+
+
 def assign_speakers(
     transcript: Transcript, turns: Sequence[SpeakerTurn], gap_tolerance_s: float
 ) -> Transcript:
@@ -77,14 +82,22 @@ def assign_speakers(
     word order; a segment spans its words and its text is the words joined with spaces.
     """
     index = _Turns(turns)
-    words = [
-        word.model_copy(update={"speaker": index.speaker_for(word, gap_tolerance_s)})
-        for segment in transcript.segments
-        for word in segment.words
-    ]
+    speakers = [index.speaker_for(word, gap_tolerance_s) for word in words_of(transcript)]
+    return relabel(transcript, speakers)
+
+
+def relabel(transcript: Transcript, speakers: Sequence[str]) -> Transcript:
+    """Give word ``i`` speaker ``speakers[i]`` and regroup words into speaker segments.
+
+    Word text and times are unchanged.
+    """
+    words = words_of(transcript)
+    if len(speakers) != len(words):
+        raise ValueError("one speaker is needed per word")
+    labeled = [w.model_copy(update={"speaker": s}) for w, s in zip(words, speakers, strict=True)]
     segments: list[Segment] = []
     run: list[Word] = []
-    for word in words:
+    for word in labeled:
         if run and word.speaker != run[-1].speaker:
             segments.append(_segment(run))
             run = []

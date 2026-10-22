@@ -19,7 +19,7 @@ from murmurs.backends.nemotron import MODEL_ID, WEIGHT_FILES, segments_to_turns
 from murmurs.backends.registry import BackendKind
 from murmurs.backends.stubs import StubAudioLoader, StubDiarizer, StubNERDetector, StubTranscriber
 from murmurs.cli import app
-from murmurs.config import Device, Stage, load_config, validate_config
+from murmurs.config import CURRENT_SCHEMA_VERSION, Device, Stage, load_config, validate_config
 from murmurs.errors import BackendSetupError
 from murmurs.models import UNKNOWN_SPEAKER, AudioInfo, Diarization, SpeakerTurn
 from murmurs.offline import WeightSpec
@@ -97,7 +97,7 @@ def test_default_diarization_model_is_nemotron() -> None:
 
 def test_version_2_config_still_loads() -> None:
     config = validate_config({**_raw_config(num_speakers=2), "schema_version": 2})
-    assert config.schema_version == 3 and config.diarization.num_speakers == 2
+    assert config.schema_version == CURRENT_SCHEMA_VERSION and config.diarization.num_speakers == 2
 
 
 def test_num_speakers_must_be_positive() -> None:

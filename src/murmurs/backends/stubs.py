@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from pydantic import ValidationError
 
 from murmurs.backends import M, Waveform
-from murmurs.errors import PipelineError
+from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
 from murmurs.models import (
     DetectorSource,
     Diarization,
@@ -191,9 +192,16 @@ class StubLLMClient(_Stub):
     def generate(
         self, prompt: str, response_model: type[M], file_id: str, system: str | None = None
     ) -> M:
-        """Ignore the prompt and validate ``response`` as ``response_model``."""
+        """Ignore the prompt and validate ``response`` as ``response_model``.
+
+        Like real clients, a response that does not validate raises
+        ``PipelineError(LLM_INVALID_OUTPUT)``, never the validation error itself.
+        """
         self._record(file_id)
-        return response_model.model_validate(self.response)
+        try:
+            return response_model.model_validate(self.response)
+        except ValidationError:
+            raise PipelineError(LLM_INVALID_OUTPUT) from None
 
 
 if TYPE_CHECKING:

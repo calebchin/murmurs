@@ -246,9 +246,16 @@ class EntityType(BaseModel):
     action: str = "redact"               # "redact" | "flag" | "ignore"
 
 
+class LLMServerConfig(BaseModel):          # the local vLLM server (D22)
+    gpu_memory_utilization: float = Field(0.85, gt=0, le=1)
+    max_model_len: int = Field(32768, ge=1024)
+    startup_timeout_s: float = Field(900, gt=0)
+
+
 class DeidConfig(BaseModel):
     ner_model: str = "OpenMed/privacy-filter-nemotron-v2"
     llm_model: str = "openai/gpt-oss-120b"
+    llm_server: LLMServerConfig = LLMServerConfig()
     entity_types: list[EntityType]
     prompt_path: Path | None = None
     redaction_threshold: float = Field(0.5, ge=0, le=1)
@@ -262,7 +269,7 @@ class ComputeConfig(BaseModel):
 
 
 class JobConfig(BaseModel):
-    schema_version: int = 3              # 2 added diarization.speaker_gap_tolerance_s; 3 switched the diarization model, made num_speakers a cap and added .mp3
+    schema_version: int = 4              # 2 added diarization.speaker_gap_tolerance_s; 3 switched the diarization model, made num_speakers a cap and added .mp3; 4 added deid.llm_server
     data: DataConfig
     sample: SampleConfig = SampleConfig()
     stages: StagesConfig = StagesConfig()

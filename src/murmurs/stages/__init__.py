@@ -14,24 +14,30 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from murmurs.backends import AudioLoader, Diarizer, NERDetector, Transcriber, Waveform
+from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber, Waveform
 from murmurs.config import JobConfig, Stage
 from murmurs.errors import PipelineError
 from murmurs.models import (
     AudioInfo,
     Diarization,
     RedactionLayer,
+    SpeakerCorrection,
     Transcript,
     TranscriptMode,
     TranscriptRef,
 )
 from murmurs.stages.assign import assign_speakers as assign_words
+from murmurs.stages.correction import correct_modes, prompt_hash
 from murmurs.store import ArtifactStore
 
 M = TypeVar("M", bound=BaseModel)
 B = TypeVar("B")
 
 MISSING_UPSTREAM = "MISSING_UPSTREAM"
+RULE_BASED = "rule_based"
+"""Variant suffix of the rule-based transcripts ``assign_speakers.<mode>.rule_based``."""
+CORRECTION_REPORT = "correction"
+"""Variant of the speaker-correction report, ``assign_speakers.correction``."""
 INVALID_INPUT = "INVALID_INPUT"
 
 DEPENDS: dict[Stage, tuple[Stage, ...]] = {
@@ -79,6 +85,7 @@ class Backends:
     diarizer: Diarizer | None = None
     transcriber: Transcriber | None = None
     ner: NERDetector | None = None
+    llm: LLMClient | None = None
 
 
 @dataclass
@@ -131,9 +138,11 @@ def stage_config(stage: Stage, config: JobConfig) -> dict[str, Any]:
             )
             if config.diarization.llm_correction:
                 values["llm_model"] = config.deid.llm_model
+                values["prompt"] = prompt_hash()
             return values
         case Stage.DETECT_PHI:
-            return config.deid.model_dump(mode="json")
+            # llm_server settings change speed and memory, not output
+            return config.deid.model_dump(mode="json", exclude={"llm_server"})
 
 
 # --- stage implementations ---------------------------------------------------------------
@@ -182,18 +191,40 @@ def transcribe(ctx: StageContext) -> None:
 def assign_speakers(ctx: StageContext) -> None:
     """Label every word with a speaker and regroup words into speaker segments.
 
-    Every transcript mode uses the same speaker turns, so words at the same times get
-    the same speaker in each mode.
+    Rule-based assignment (P2-05) runs for every mode with the same speaker turns. With
+    ``diarization.llm_correction`` on, the LLM then fixes label mistakes in one mode and
+    the other follows by word time (P2-07, D24). Writes the final transcripts (used
+    downstream), the rule-based ones (``<mode>.rule_based``) and a counts-only
+    ``correction`` report, whether or not correction ran.
     """
     turns = ctx.read(Stage.DIARIZE, Diarization).turns
     tolerance = ctx.config.diarization.speaker_gap_tolerance_s
-    for mode in ctx.modes:
-        transcript = ctx.read(Stage.TRANSCRIBE, Transcript, variant=mode.value)
-        labeled = assign_words(transcript, turns, tolerance)
-        ctx.store.write(ctx.file_id, Stage.ASSIGN_SPEAKERS, labeled, variant=mode.value)
-        ctx.store.write_transcript_text(
-            ctx.file_id, Stage.ASSIGN_SPEAKERS, labeled, variant=mode.value
+    rule_based = {
+        mode: assign_words(
+            ctx.read(Stage.TRANSCRIBE, Transcript, variant=mode.value), turns, tolerance
         )
+        for mode in ctx.modes
+    }
+    final: dict[TranscriptMode, Transcript] = dict(rule_based)
+    report = SpeakerCorrection(file_id=ctx.file_id, enabled=False)
+    if ctx.config.diarization.llm_correction:
+        final, report = correct_modes(
+            rule_based,
+            _need(ctx.backends.llm),
+            ctx.file_id,
+            ctx.config.deid.llm_server.max_model_len,
+        )
+    for mode in ctx.modes:
+        variant = f"{mode.value}.{RULE_BASED}"
+        ctx.store.write(ctx.file_id, Stage.ASSIGN_SPEAKERS, rule_based[mode], variant=variant)
+        ctx.store.write_transcript_text(
+            ctx.file_id, Stage.ASSIGN_SPEAKERS, rule_based[mode], variant=variant
+        )
+        ctx.store.write(ctx.file_id, Stage.ASSIGN_SPEAKERS, final[mode], variant=mode.value)
+        ctx.store.write_transcript_text(
+            ctx.file_id, Stage.ASSIGN_SPEAKERS, final[mode], variant=mode.value
+        )
+    ctx.store.write(ctx.file_id, Stage.ASSIGN_SPEAKERS, report, variant=CORRECTION_REPORT)
 
 
 def detect_phi(ctx: StageContext) -> None:

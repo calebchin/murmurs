@@ -1,0 +1,13 @@
+# The local vLLM server's own environment (D6, D22). It is built by
+# `murmurs models download` under ~/.cache/murmurs/vllm-server/<lock hash>/ with
+# `uv sync --frozen`, never installed into the pipeline's environment: vLLM pins exact
+# torch and transformers versions that must not dictate the pipeline's.
+# After editing this file, regenerate the lock: `uv lock --project <this folder>`.
+[project]
+name = "murmurs-vllm-server"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["vllm==0.31.0"]
+
+[tool.uv]
+package = false

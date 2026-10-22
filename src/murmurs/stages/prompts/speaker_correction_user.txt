@@ -1,0 +1,12 @@
+Speakers in this transcript: $speakers
+
+The transcript is below, one line per run of words from one speaker. Each word starts with its number in square brackets. Lines that start with CONTEXT are shown only so you can see whole turns at the edges of this excerpt: never change words on CONTEXT lines.
+
+$transcript
+
+List the label changes needed. For each change give:
+- first_word and last_word: the numbers of the first and last word whose speaker should change (inclusive, consecutive words only);
+- text: exactly those words, in order, separated by single spaces, copied without their numbers;
+- speaker: the correct speaker, one of the speakers listed above.
+
+Only include words whose speaker is wrong. If every label is right, return an empty list of changes.

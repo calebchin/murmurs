@@ -120,6 +120,15 @@ def test_ner_finds_configured_targets() -> None:
     assert all(s.entity_type == "first_name" for s in spans)
 
 
+def test_llm_invalid_response_raises_coded_error() -> None:
+    class Answer(BaseModel):
+        speaker: str
+
+    with pytest.raises(PipelineError) as info:
+        StubLLMClient(response={"wrong": 1}).generate("p", Answer, "f1")
+    assert info.value.code == "LLM_INVALID_OUTPUT" and info.value.__cause__ is None
+
+
 def test_llm_returns_validated_response() -> None:
     class Answer(BaseModel):
         speaker: str
