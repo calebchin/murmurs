@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import torchcodec
 from conftest import SENTINEL, StubJob
+from fixtures.audio import tone_wav_bytes
 from typer.testing import CliRunner
 
 from murmurs import __version__
@@ -19,7 +21,7 @@ from murmurs.runner import create_backends, run_job
 from murmurs.stages import Backends
 from murmurs.store import ArtifactStore
 
-TEN_FILES = {f"f{i}.wav": f"audio-{i}".encode() for i in range(10)}
+TEN_FILES = {f"f{i}.wav": tone_wav_bytes(frequency=200 + 50 * i) for i in range(10)}
 
 
 def _manifest(config: JobConfig, job_id: str) -> RunManifest:
@@ -66,7 +68,7 @@ def test_manifest_records_versions_hashes_and_statuses(stub_job: StubJob) -> Non
     assert manifest.package_version == __version__
     assert manifest.dependency_versions["pydantic"]
     assert manifest.model_versions == {
-        "audio_loader": "stub",
+        "audio_loader": f"torchcodec {torchcodec.__version__}",
         "diarizer": "stub",
         "transcriber": "stub",
         "ner": "stub",
@@ -82,7 +84,9 @@ def test_manifest_only_records_backends_the_range_used(stub_job: StubJob) -> Non
     config = load_config(stub_job())
     stages = config.stages.model_copy(update={"end": Stage.INGEST})
     run_job(config.model_copy(update={"stages": stages}), "job", console=io.StringIO())
-    assert _manifest(config, "job").model_versions == {"audio_loader": "stub"}
+    assert _manifest(config, "job").model_versions == {
+        "audio_loader": f"torchcodec {torchcodec.__version__}"
+    }
 
 
 def _stub_backends(config: JobConfig) -> Backends:

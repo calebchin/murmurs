@@ -108,7 +108,14 @@ def test_runner_enforces_offline_before_creating_backends(stub_job: StubJob) -> 
 
 
 def test_importing_murmurs_does_not_import_model_libraries() -> None:
-    watched = ("huggingface_hub", "transformers", "pyannote", "crisperwhisper")
+    watched = (
+        "huggingface_hub",
+        "transformers",
+        "pyannote",
+        "crisperwhisper",
+        "torch",
+        "torchcodec",
+    )
     code = (
         "import sys\n"
         "import murmurs, murmurs.cli, murmurs.runner, murmurs.offline\n"

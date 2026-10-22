@@ -17,6 +17,7 @@ from murmurs.backends import (
     Waveform,
     registry,
 )
+from murmurs.backends.audio import TorchcodecAudioLoader
 from murmurs.backends.registry import BackendKind
 from murmurs.backends.stubs import (
     STUB_FAILURE,
@@ -166,7 +167,8 @@ def test_pipeline_error_requires_code_format() -> None:
 
 def test_registry_creates_stubs_from_config() -> None:
     config = _stub_config()
-    assert isinstance(registry.create_audio_loader(config), StubAudioLoader)
+    # The audio loader has no config field; "default" is the torchcodec loader (P2-01).
+    assert isinstance(registry.create_audio_loader(config), TorchcodecAudioLoader)
     assert isinstance(registry.create_diarizer(config), StubDiarizer)
     assert isinstance(registry.create_transcriber(config), StubTranscriber)
     assert isinstance(registry.create_ner_detector(config), StubNERDetector)

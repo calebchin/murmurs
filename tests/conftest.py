@@ -9,6 +9,7 @@ from typing import Any
 import huggingface_hub.constants
 import pytest
 import yaml
+from fixtures.audio import tone_wav_bytes, write_tone_m4a
 
 from murmurs.offline import OFFLINE_ENV
 
@@ -76,15 +77,18 @@ StubJob = Callable[..., Path]
 def stub_job(tmp_path: Path) -> StubJob:
     """Create input files and a stub-backend config; returns the config path.
 
-    ``files`` maps relative input paths to contents (fake audio bytes; stubs never
-    decode them). Extra keyword arguments are merged into the config sections.
+    By default the inputs are real audio (two WAV tones and an AAC .m4a), since the
+    ``"default"`` audio loader probes them with torchcodec. ``files`` maps relative
+    input paths to contents instead; fake bytes are fine only for tests that inject
+    ``StubAudioLoader``. Extra keyword arguments are merged into the config sections.
     """
 
     def make(files: dict[str, bytes] | None = None, **sections: dict[str, Any]) -> Path:
         input_dir = tmp_path / "in"
         input_dir.mkdir(exist_ok=True)
         if files is None:
-            files = {"a.wav": b"audio-a", "b.wav": b"audio-b", "c.m4a": b"audio-c"}
+            files = {"a.wav": tone_wav_bytes(frequency=440), "b.wav": tone_wav_bytes(frequency=660)}
+            write_tone_m4a(input_dir / "c.m4a", frequency=880)
         for name, content in files.items():
             path = input_dir / name
             path.parent.mkdir(parents=True, exist_ok=True)

@@ -56,13 +56,36 @@ def _check_time_range(start: float, end: float) -> None:
 # --- Ingest ---------------------------------------------------------------------
 
 
-class ValidationResult(_Model):
-    """Stage 1 output: what ingest found out about one input file."""
+class IngestErrorCode(StrEnum):
+    """Why ingest rejected a file. The only codes a ``ValidationResult`` error uses."""
 
-    schema_version: Literal[1] = 1
+    UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
+    """The extension is not in ``data.audio_extensions``."""
+    EMPTY = "EMPTY"
+    """Zero bytes, or a container with zero duration."""
+    UNREADABLE = "UNREADABLE"
+    """Not a container the decoder can open (e.g. a text file), or no duration in it."""
+    NO_AUDIO_STREAM = "NO_AUDIO_STREAM"
+    """A valid container with no audio stream."""
+    CORRUPT = "CORRUPT"
+    """The start of the audio stream cannot be decoded."""
+    TRUNCATED = "TRUNCATED"
+    """The file ends before its header says it should, or its end cannot be decoded."""
+
+
+class ValidationResult(_Model):
+    """Stage 1 output: what ingest found out about one input file.
+
+    (Schema 2 added ``codec``.)
+    """
+
+    schema_version: Literal[2] = 2
     file_id: str
     path: str
     format: str | None = None
+    """Container format, from the file extension (e.g. ``"wav"``, ``"m4a"``)."""
+    codec: str | None = None
+    """Audio codec name as the decoder reports it (e.g. ``"pcm_s16le"``, ``"aac"``)."""
     duration_s: float | None = Field(None, ge=0)
     sample_rate: int | None = Field(None, gt=0)
     channels: int | None = Field(None, gt=0)

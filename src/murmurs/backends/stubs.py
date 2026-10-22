@@ -20,6 +20,7 @@ from murmurs.models import (
     DetectorSource,
     Diarization,
     ErrorInfo,
+    IngestErrorCode,
     RedactionSpan,
     Segment,
     SpeakerTurn,
@@ -72,7 +73,10 @@ class StubAudioLoader(_Stub):
         self._record(file_id)
         if path.stat().st_size == 0:
             return ValidationResult(
-                file_id=file_id, path=str(path), valid=False, error=ErrorInfo(code="EMPTY")
+                file_id=file_id,
+                path=str(path),
+                valid=False,
+                error=ErrorInfo(code=IngestErrorCode.EMPTY),
             )
         return ValidationResult(
             file_id=file_id,

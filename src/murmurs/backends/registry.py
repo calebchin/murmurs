@@ -26,6 +26,7 @@ from enum import StrEnum
 from typing import Any
 
 from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber
+from murmurs.backends.audio import TorchcodecAudioLoader
 from murmurs.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
@@ -169,8 +170,11 @@ def create_llm_client(config: JobConfig) -> LLMClient:
 
 
 register(BackendKind.AUDIO_LOADER, STUB, lambda _: StubAudioLoader())
-# Phase 1 has no real audio loader; P2-02 points "default" at the torchcodec loader.
-register(BackendKind.AUDIO_LOADER, DEFAULT_AUDIO_LOADER, lambda _: StubAudioLoader())
+register(
+    BackendKind.AUDIO_LOADER,
+    DEFAULT_AUDIO_LOADER,
+    lambda config: TorchcodecAudioLoader(config.data.audio_extensions),
+)
 register(BackendKind.DIARIZER, STUB, lambda _: StubDiarizer())
 register(BackendKind.TRANSCRIBER, STUB, lambda _: StubTranscriber())
 register(BackendKind.NER, STUB, lambda _: StubNERDetector())

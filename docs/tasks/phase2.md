@@ -24,7 +24,8 @@ The design doc was silent or had an open question on each item below. Tasks that
 | D4 | **Non-Linux transcription backend.** | Out of scope for this phase. `backend: transformers` fails at setup (exit code 2) with "not supported yet", and so does `backend: auto` on a platform where `ct2` is unavailable. Added to "Deferred to later versions" in the design doc. | P2-04 |
 | D5 | **Words with no overlapping speaker turn.** | Nearest turn if the gap is within a tolerance, otherwise speaker `UNKNOWN`. The tolerance is a new config field, `diarization.speaker_gap_tolerance_s` (default 0.5 s), and `JobConfig.schema_version` goes to 2. | P2-05, config |
 | D11 | **Offline operation.** | The first deployment machine (the current dev machine) runs disconnected. Weights are downloaded on it while connected, then it goes offline. Runs force Hugging Face offline mode, never read `HF_TOKEN`, and fail at setup (exit code 2) if a required model is not cached. `HF_TOKEN` is used only by `murmurs models download`. Recorded in `docs/design.md` → Operations and packaging. | P2-00, P2-03, P2-04, P2-06, P2-10 |
-| D12 | **Stub test inputs once the real audio loader exists.** | The `stub_job` fixture in `tests/conftest.py` writes real tone audio (`tests/fixtures/audio.py`) instead of fake bytes, so tests that use the `"default"` audio loader run the real torchcodec loader on CPU. | P2-02 |
+| D12 | **Stub test inputs once the real audio loader exists.** | The `stub_job` fixture in `tests/conftest.py` writes real tone audio (`tests/fixtures/audio.py`) instead of fake bytes, so tests that use the `"default"` audio loader run the real torchcodec loader on CPU. Moved to P2-01 by D13. | P2-01 |
+| D13 | **Where the real probe lives, and when `"default"` switches.** | The torchcodec code lives in `murmurs.backends` as a `TorchcodecAudioLoader`; the ingest flow stays in `murmurs.stages`. P2-01 adds the class with a real `probe`, whose `load` delegates to the stub loader until P2-02, and points the `"default"` audio loader at it. Because the real probe rejects fake bytes, the D12 fixture change happens in P2-01, not P2-02. | P2-01, P2-02 |
 
 ### Open
 
@@ -69,9 +70,11 @@ The design doc was silent or had an open question on each item below. Tasks that
 
 **Goal:** stage 1 checks every input file and records why bad files are rejected, without modifying them.
 
-**Depends on:** D2, D3 (resolved).
+**Depends on:** D2, D3, D12, D13 (resolved).
 
-**Scope** (in `murmurs.stages`)
+**Scope** (probe in `murmurs.backends`, ingest flow in `murmurs.stages`; see D13)
+- `TorchcodecAudioLoader` in `murmurs.backends` with a real `probe`; its `load` delegates to the stub loader until P2-02. Register it as the `"default"` audio loader.
+- Test inputs (D12, moved here by D13): change the `stub_job` fixture in `tests/conftest.py` to write short tone files with `tests/fixtures/audio.py` instead of fake bytes. Tests that pass inputs explicitly with fake bytes and rely on the default loader move to tone files too; tests that inject `StubAudioLoader` directly may keep fake bytes. Generate any .m4a fixtures at test time; never commit audio.
 - Read container metadata with `torchcodec` (`AudioDecoder` metadata) without decoding the full file: format, codec, duration, sample rate, channels.
 - Checks: extension in `data.audio_extensions`, readable container, at least one audio stream, nonzero duration. No minimum or maximum duration (D3).
 - Detect corruption cheaply (header probe plus a short decode at start and end), not by decoding the whole file.
@@ -102,7 +105,7 @@ The design doc was silent or had an open question on each item below. Tasks that
 - The waveform is not an artifact. The stage writes a small metadata artifact (sample count, duration, sample rate, input hash) so the runner can record completion.
 - The runner keeps the waveform in memory for that file's remaining stages and frees it after the file's last audio stage. On resume, if a later stage needs audio and the waveform is not in memory, it is decoded again.
 - Peak memory note in the summary: roughly 230 MB per hour of audio at 16 kHz float32.
-- Test inputs (D12): change the `stub_job` fixture in `tests/conftest.py` to write short tone files with `tests/fixtures/audio.py` instead of fake bytes, since the `"default"` audio loader now decodes real audio. Tests that pass inputs explicitly with fake bytes and rely on the default loader move to tone files too; tests that inject `StubAudioLoader` directly may keep fake bytes.
+- Replace the stub delegation in `TorchcodecAudioLoader.load` (from P2-01, D13) with real decoding. The `stub_job` fixture already writes tone files (D12, done in P2-01).
 
 **Out of scope:** chunking audio (CrisperWhisper and pyannote take the full recording).
 
