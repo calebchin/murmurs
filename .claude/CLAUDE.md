@@ -58,8 +58,8 @@ Before finishing any task, run `uv run ruff check .`, `uv run ruff format --chec
 
 - Transcription uses `crisperwhisper[ct2]` (Linux x86_64 only). Never install `faster-whisper` or upstream `ctranslate2` in the same environment; they overwrite the fork CrisperWhisper depends on.
 - The CrisperWhisper `ct2` model must be loaded and run on a single dedicated thread. Parallelism uses separate processes.
-- Audio decoding uses `torchcodec` with the system `ffmpeg`. Keep the `torch` and `torchcodec` versions compatible (see torchcodec's compatibility table); pyannote also depends on `torch`.
-- Diarization uses `pyannote/speaker-diarization-3.1`, a gated Hugging Face model. Only `murmurs models download` reads the token, from the `HF_TOKEN` environment variable; runs load cached weights and never read it. Never hard-code or log the token.
+- Audio decoding uses `torchcodec` with the system `ffmpeg`. Keep the `torch` and `torchcodec` versions compatible (see torchcodec's compatibility table).
+- Diarization uses `nvidia/Nemotron-3-Diarization` through `transformers` (5.18 or later; its feature extractor also needs `librosa`). It is not gated. Gated models (if any are added) need a token: only `murmurs models download` reads it, from the `HF_TOKEN` environment variable; runs load cached weights and never read it. Never hard-code or log the token.
 - The pipeline must run with no network connection. Real backends load weights from the local cache only and import model libraries lazily (inside the factory), never at import time of `murmurs.backends.registry`.
 - NER uses `OpenMed/privacy-filter-nemotron-v2`; LLM uses GPT-OSS 120B. Both run locally.
 - Do not add new dependencies without saying so in your summary and explaining why.

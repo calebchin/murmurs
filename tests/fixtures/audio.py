@@ -53,6 +53,17 @@ def write_tone_m4a(
     channels: int = 1,
 ) -> Path:
     """Write a sine-tone AAC .m4a file with torchcodec's encoder."""
+    return write_tone_encoded(path, seconds, frequency, sample_rate, channels)
+
+
+def write_tone_encoded(
+    path: Path,
+    seconds: float = 1.0,
+    frequency: float = 440.0,
+    sample_rate: int = 16_000,
+    channels: int = 1,
+) -> Path:
+    """Write a sine tone with torchcodec's encoder; the extension picks the format."""
     import torch
     from torchcodec.encoders import AudioEncoder
 

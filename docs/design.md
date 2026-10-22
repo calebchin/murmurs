@@ -95,9 +95,9 @@ The pipeline has seven stages with defined inputs and outputs, so any range of s
 
 | # | Stage | Input | Output | Method |
 | --- | --- | --- | --- | --- |
-| 1 | Ingest and validate | Raw .wav or .m4a files | Validation metadata (JSON) | Format, sample rate, corruption and duration checks |
+| 1 | Ingest and validate | Raw .wav, .m4a or .mp3 files | Validation metadata (JSON) | Format, sample rate, corruption and duration checks |
 | 2 | Audio loading | Original audio file | In-memory 16 kHz mono waveform | Decode once with torchcodec (system ffmpeg) and resample in memory; the original file and format are untouched, and no converted file is written |
-| 3 | Diarization | Waveform | Speaker turns (JSON) | Pyannote 3.1 on the full recording |
+| 3 | Diarization | Waveform | Speaker turns (JSON) | NVIDIA Nemotron-3-Diarization (via `transformers`) on the full recording; the model chunks long audio itself |
 | 4 | Transcription | Waveform | Verbatim and intended transcripts with word-level timestamps | CrisperWhisper 2.0 `transcribe_dual`, which handles long audio itself with no stitching needed |
 | 5 | Speaker assignment | Word timestamps + speaker turns | Full speaker-labeled transcript | Assign each word to the speaker turn it overlaps most; a word in a gap goes to the nearest turn within `speaker_gap_tolerance_s`, else `UNKNOWN`; optional LLM pass to fix diarization mistakes |
 | 6 | PHI detection | Full transcript | Annotated transcript for review + clean version (PHI above a set threshold redacted) | NER model + LLM ensemble |
@@ -112,6 +112,7 @@ Regex-based detection is not used, since the expected identifiers do not follow 
 - **CrisperWhisper threading:** the `ct2` model must be loaded and run on one dedicated thread, so parallel transcription means separate processes, not threads.
 - **CrisperWhisper license:** inference code is MIT, but the standard model weights are under a non-commercial research license.
 - **Hotword boosting** for names and rare terms is available only in the commercial Pro models.
+- **Nemotron-3-Diarization:** finds up to 8 speakers on its own and takes no speaker count. `diarization.num_speakers` is therefore a cap applied afterwards: speakers beyond the N with the most talk time are labeled `UNKNOWN`. Its raw frame-level output is used with no smoothing. Chosen over pyannote 3.1 and community-1 after a spike (Oct 21, 2026): lower published DER (DIHARD III 12.7 vs 21.4 for 3.1), about 2 s and 0.8 GB of GPU memory for an hour of audio, not gated, and OpenMDW-1.1 licensed.
 
 ## Data model
 
@@ -204,7 +205,7 @@ class Device(str, Enum):
 class DataConfig(BaseModel):
     input_dir: Path
     output_dir: Path
-    audio_extensions: list[str] = [".wav", ".m4a"]
+    audio_extensions: list[str] = [".wav", ".m4a", ".mp3"]
 
 
 class SampleConfig(BaseModel):
@@ -220,8 +221,8 @@ class StagesConfig(BaseModel):
 
 
 class DiarizationConfig(BaseModel):
-    model: str = "pyannote/speaker-diarization-3.1"
-    num_speakers: int | None = None      # None = let the model estimate
+    model: str = "nvidia/Nemotron-3-Diarization"
+    num_speakers: int | None = Field(None, ge=1)  # cap: extra speakers become UNKNOWN; None = keep all
     speaker_gap_tolerance_s: float = Field(0.5, ge=0)  # max gap to nearest turn, else UNKNOWN
     llm_correction: bool = True
 
@@ -258,7 +259,7 @@ class ComputeConfig(BaseModel):
 
 
 class JobConfig(BaseModel):
-    schema_version: int = 2              # 2 added diarization.speaker_gap_tolerance_s
+    schema_version: int = 3              # 2 added diarization.speaker_gap_tolerance_s; 3 switched the diarization model, made num_speakers a cap and added .mp3
     data: DataConfig
     sample: SampleConfig = SampleConfig()
     stages: StagesConfig = StagesConfig()
@@ -289,7 +290,7 @@ The tool picks open-source models that fit available GPU memory, parallelizes wh
 - **Parallelism:** transcription and deidentification run in parallel when memory allows.
 - **Observability:** per-stage progress reporting, PHI-free structured logs, and timing metrics.
 - **Packaging:** uv as the package manager. Audio decoding uses torchcodec, which needs a system ffmpeg install. Offline runs use `uv run --frozen` (or `UV_OFFLINE=1`) so uv never tries to resolve or fetch packages.
-- **Offline operation:** the first deployment machine runs disconnected. Setup, done while connected, is `uv sync` plus `murmurs models download`, which fetches every model the job config names into the local Hugging Face cache, including sub-models (e.g. pyannote's segmentation and embedding models) and auxiliary files (e.g. tokenizer vocabularies, remote model code). At run time the pipeline forces Hugging Face offline mode before any model library is imported, never reads `HF_TOKEN`, and fails at setup with a clear message if a required model is not cached. The token is needed only by the download command, for gated models.
+- **Offline operation:** the first deployment machine runs disconnected. Setup, done while connected, is `uv sync` plus `murmurs models download`, which fetches every model the job config names into the local Hugging Face cache, including sub-models of multi-model pipelines and auxiliary files (e.g. tokenizer vocabularies, remote model code). At run time the pipeline forces Hugging Face offline mode before any model library is imported, never reads `HF_TOKEN`, and fails at setup with a clear message if a required model is not cached. The token is needed only by the download command, for gated models.
 - **Extensibility:** STT, diarization, NER and LLM backends sit behind interfaces so they can be swapped without touching pipeline code.
 - **Output formats:** plain text for transcripts; JSON for metadata and other artifacts.
 

@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 """Newest config schema version this code reads. Older versions are migrated on load."""
 
 
@@ -89,7 +89,7 @@ class DataConfig(_Model):
 
     input_dir: Path
     output_dir: Path
-    audio_extensions: list[str] = [".wav", ".m4a"]
+    audio_extensions: list[str] = [".wav", ".m4a", ".mp3"]
 
     @field_validator("input_dir", "output_dir")
     @classmethod
@@ -124,8 +124,10 @@ class StagesConfig(_Model):
 class DiarizationConfig(_Model):
     """Speaker diarization and speaker assignment settings."""
 
-    model: str = "pyannote/speaker-diarization-3.1"
-    num_speakers: int | None = None
+    model: str = "nvidia/Nemotron-3-Diarization"
+    num_speakers: int | None = Field(None, ge=1)
+    """Cap on speakers: those beyond the N with the most talk time become ``UNKNOWN``.
+    ``None`` keeps every speaker the model finds."""
     speaker_gap_tolerance_s: float = Field(0.5, ge=0)
     llm_correction: bool = True
 
@@ -206,6 +208,9 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
             ]
         )
     # 1 -> 2 added diarization.speaker_gap_tolerance_s, which has a default.
+    # 2 -> 3 changed the diarization.model default, made num_speakers a cap and added
+    # .mp3 to the default audio_extensions; the fields are unchanged, so there is
+    # nothing to rewrite.
     return {**raw, "schema_version": CURRENT_SCHEMA_VERSION}
 
 

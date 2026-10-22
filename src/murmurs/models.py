@@ -122,6 +122,10 @@ class AudioInfo(_Model):
 # --- Diarization and transcription ------------------------------------------------
 
 
+UNKNOWN_SPEAKER = "UNKNOWN"
+"""Speaker label for speech that cannot be attributed to one of the file's speakers."""
+
+
 class SpeakerTurn(_Frozen):
     """One stretch of time attributed to one speaker."""
 

@@ -19,6 +19,7 @@ from murmurs.backends import AudioLoader, Diarizer, NERDetector, Transcriber, Wa
 from murmurs.config import JobConfig, Stage
 from murmurs.errors import PipelineError
 from murmurs.models import (
+    UNKNOWN_SPEAKER,
     AudioInfo,
     Diarization,
     RedactionLayer,
@@ -34,7 +35,6 @@ from murmurs.store import ArtifactStore
 M = TypeVar("M", bound=BaseModel)
 B = TypeVar("B")
 
-UNKNOWN_SPEAKER = "UNKNOWN"
 MISSING_UPSTREAM = "MISSING_UPSTREAM"
 INVALID_INPUT = "INVALID_INPUT"
 

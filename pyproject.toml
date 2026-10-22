@@ -9,11 +9,13 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "huggingface-hub>=2.2.0",
+    "librosa>=0.11,<1.1",
     "numpy>=1.26",
     "pydantic>=2.7",
     "pyyaml>=6",
     "torch>=2.11,<2.12",
     "torchcodec>=0.17,<0.18",
+    "transformers>=5.18,<5.20",
     "typer>=0.12",
 ]
 

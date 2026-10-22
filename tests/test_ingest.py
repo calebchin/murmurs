@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 from conftest import SENTINEL, StubJob
-from fixtures.audio import tone_wav_bytes, write_tone, write_tone_m4a
+from fixtures.audio import tone_wav_bytes, write_tone, write_tone_encoded, write_tone_m4a
 
 from murmurs.backends.audio import TorchcodecAudioLoader, _wav_data_truncated
-from murmurs.config import JobConfig, Stage, load_config
+from murmurs.config import DataConfig, JobConfig, Stage, load_config
 from murmurs.models import IngestErrorCode, StageStatus, ValidationResult
 from murmurs.runner import JobSummary, run_job
 from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
@@ -296,3 +296,19 @@ def test_ingest_leaves_inputs_unchanged(stub_job: StubJob) -> None:
     for path, (content, mtime_ns) in before.items():
         assert path.read_bytes() == content
         assert path.stat().st_mtime_ns == mtime_ns
+
+
+# --- MP3 (D16) -------------------------------------------------------------------------------
+
+
+def test_mp3_is_a_default_extension() -> None:
+    assert ".mp3" in DataConfig(input_dir=Path("/in"), output_dir=Path("/out")).audio_extensions
+
+
+def test_mp3_reports_metadata(tmp_path: Path) -> None:
+    path = write_tone_encoded(tmp_path / "a.mp3", seconds=2.0, sample_rate=44_100, channels=2)
+    result = TorchcodecAudioLoader([".mp3"]).probe(path, "f1")
+    assert result.valid
+    assert result.format == "mp3" and result.codec == "mp3"
+    assert result.sample_rate == 44_100 and result.channels == 2
+    assert result.duration_s == pytest.approx(2.0, abs=0.1)

@@ -21,10 +21,10 @@ KEY_DEPENDENCIES = (
     "typer",
     "torch",
     "torchcodec",
-    "pyannote.audio",
     "crisperwhisper",
     "ctranslate2",
     "transformers",
+    "librosa",
 )
 """Packages whose versions are recorded when installed."""
 

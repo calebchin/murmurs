@@ -27,6 +27,8 @@ The design doc was silent or had an open question on each item below. Tasks that
 | D12 | **Stub test inputs once the real audio loader exists.** | The `stub_job` fixture in `tests/conftest.py` writes real tone audio (`tests/fixtures/audio.py`) instead of fake bytes, so tests that use the `"default"` audio loader run the real torchcodec loader on CPU. Moved to P2-01 by D13. | P2-01 |
 | D13 | **Where the real probe lives, and when `"default"` switches.** | The torchcodec code lives in `murmurs.backends` as a `TorchcodecAudioLoader`; the ingest flow stays in `murmurs.stages`. P2-01 adds the class with a real `probe`, whose `load` delegates to the stub loader until P2-02, and points the `"default"` audio loader at it. Because the real probe rejects fake bytes, the D12 fixture change happens in P2-01, not P2-02. | P2-01, P2-02 |
 | D14 | **Downmix to mono.** ffmpeg's built-in downmix (`num_channels=1`) is `(L + R) × 0.7071`, not a mean, so correlated stereo comes out about 1.41× louder and can exceed ±1. | torchcodec resamples to 16 kHz and keeps the source channels; the loader averages channels in numpy. Output stays in [−1, 1]. For multi-channel input, peak memory briefly holds every channel at 16 kHz (about 230 MB per hour per channel) while averaging. | P2-02 |
+| D15 | **Diarization model.** The design named pyannote 3.1. | `nvidia/Nemotron-3-Diarization` through `transformers` (≥ 5.18, plus `librosa` for its feature extractor), chosen after a spike on Oct 21, 2026: it loads offline, takes about 2 s and 0.8 GB of GPU memory for an hour of audio, and found the two main speakers of a 53-minute podcast at thresholds 0.3–0.7. `diarization.num_speakers` becomes a cap: speakers beyond the N with the most talk time are labeled `UNKNOWN` (the model cannot be told a speaker count). No smoothing of the model's frame-level output. `JobConfig.schema_version` goes to 3. Recorded in `docs/design.md`. | P2-03, config |
+| D16 | **MP3 input.** The design listed .wav and .m4a only. | `.mp3` is added to the default `data.audio_extensions` (the example audio is an MP3; ingest and the torchcodec loader already handle it). Folded into config schema 3. | config |
 
 ### Open
 
@@ -120,23 +122,26 @@ The design doc was silent or had an open question on each item below. Tasks that
 
 ## P2-03: Diarization backend
 
-**Goal:** stage 3 produces speaker turns with pyannote 3.1.
+**Goal:** stage 3 produces speaker turns with Nemotron-3-Diarization (D15).
+
+**Depends on:** D11, D15 (resolved).
 
 **Scope** (in `murmurs.backends`)
-- `PyannoteDiarizer` implementing `Diarizer`, loading `diarization.model`.
-- Pass the in-memory waveform to pyannote (as a tensor with its sample rate), never a file path.
-- Load weights from the local cache only (D11, P2-00); do not read `HF_TOKEN` at run time. Declare the weights for P2-00: the pipeline repo and its sub-models (for 3.1, `pyannote/segmentation-3.0` and `pyannote/wespeaker-voxceleb-resnet34-LM`; confirm from the pipeline's `config.yaml`). If any are not cached, setup fails with exit code 2 through the P2-00 check.
-- Disable any telemetry or update checks the installed `pyannote.audio` version has, if it has them.
-- Honor `diarization.num_speakers` (`None` lets the model estimate) and `compute.device` (`auto` picks CUDA if available, else CPU with a logged notice).
-- Convert pyannote output to a list of `SpeakerTurn` with normalized labels (`SPEAKER_00`, `SPEAKER_01`, ...), sorted by start time.
+- Config change (D15): `diarization.model` defaults to `nvidia/Nemotron-3-Diarization`; `num_speakers` gets `ge=1` and its meaning becomes a cap; `JobConfig.schema_version` goes to 3 (versions 1 and 2 still load). Update `examples/job.yaml`.
+- `NemotronDiarizer` implementing `Diarizer`, registered under `nvidia/Nemotron-3-Diarization`. Load the processor and model with `transformers` inside the factory, never at registry import time.
+- Pass the in-memory waveform (numpy array at 16 kHz) to the processor, never a file path. Offline mode: one forward over the whole recording, which the model chunks itself.
+- Load weights from the local cache only (D11, P2-00); do not read `HF_TOKEN` at run time. Declare one `WeightSpec` limited to `config.json`, `processor_config.json` and `model.safetensors` (not the `.nemo`, GGUF or demo media). If missing, setup fails with exit code 2 through the P2-00 check.
+- `compute.device`: `auto` picks CUDA if available, else CPU with a logged notice. Run in float32.
+- Convert the processor's segments (`extract_speaker_dict`, threshold 0.5, no smoothing) to `SpeakerTurn`s sorted by start time, labeled `SPEAKER_00`, `SPEAKER_01`, ... in order of first appearance. With `num_speakers` = N, speakers beyond the N with the most talk time are labeled `UNKNOWN`. Overlapping turns are kept.
+- Library exceptions become a `PipelineError` with a fixed code; their text is discarded.
 - Report model name and version to the run manifest.
 - Load the model once per worker process, not once per file.
 
-**Out of scope:** overlap-aware word assignment (P2-05), LLM correction (P2-07).
+**Out of scope:** smoothing, overlap-aware word assignment (P2-05), LLM correction (P2-07), a pyannote backend.
 
 **Acceptance criteria**
-- Unit test: conversion from a fake pyannote annotation produces sorted, normalized `SpeakerTurn`s.
-- With the pyannote weights missing from the cache, a run exits 2 before any file is processed and names the missing repos.
+- Unit test: conversion from fake processor segments produces sorted, normalized `SpeakerTurn`s, and `num_speakers` relabels the speakers with the least talk time as `UNKNOWN`.
+- With the Nemotron weights missing from the cache, a run exits 2 before any file is processed and names the missing repo.
 - With `HF_TOKEN` unset, a run with cached weights still succeeds (`@pytest.mark.gpu`).
 - `@pytest.mark.gpu`: on a two-speaker example file, diarization returns at least two speakers and turns covering most of the speech, with offline mode forced and the network guard active.
 

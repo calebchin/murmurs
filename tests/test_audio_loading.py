@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from conftest import StubJob
-from fixtures.audio import tone_wav_bytes, write_tone, write_tone_m4a
+from fixtures.audio import tone_wav_bytes, write_tone, write_tone_encoded, write_tone_m4a
 
 from murmurs.backends import Waveform
 from murmurs.backends.audio import DECODE_FAILED, TARGET_SAMPLE_RATE, TorchcodecAudioLoader
@@ -224,3 +224,10 @@ def test_waveform_freed_after_last_audio_stage(stub_job: StubJob) -> None:
     assert len(summary.done) == 3
     assert len(loader.loaded) == 3  # decoded once per file, shared by later stages
     assert ner.alive_at_detect and all(n == 0 for n in ner.alive_at_detect)
+
+
+def test_mp3_loads_as_mono_16k(tmp_path: Path) -> None:
+    path = write_tone_encoded(tmp_path / "a.mp3", seconds=2.0, sample_rate=44_100, channels=2)
+    waveform = TorchcodecAudioLoader([".mp3"]).load(path, "f1")
+    assert waveform.sample_rate == TARGET_SAMPLE_RATE and waveform.samples.ndim == 1
+    assert abs(waveform.duration_s - 2.0) < 0.1  # MP3 frames pad the ends

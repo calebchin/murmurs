@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-from murmurs.backends import registry
+from murmurs.backends import AudioLoader, Diarizer, NERDetector, Transcriber, registry
 from murmurs.backends.registry import BackendKind
 from murmurs.config import JobConfig, Stage
 from murmurs.errors import BackendSetupError, PipelineError, SetupError
@@ -262,6 +262,9 @@ def run_job(
         weight_revisions = check_weights(config, stages)
         logger.info("weights_cached", count=len(weight_revisions))
         backends = create_backends(config, stages)
+    for kind, backend in _created(backends).items():
+        if getattr(backend, "device_fallback", False):
+            logger.warning("device_fallback_cpu", backend=kind)
 
     summary = JobSummary(job_id=job_id, duplicates=discovery.duplicates)
     for dup in discovery.duplicates:
@@ -314,15 +317,20 @@ def run_job(
     return summary
 
 
-def _model_versions(backends: Backends) -> dict[str, str]:
-    """Model version reported by each backend the job created."""
-    created = {
+def _created(backends: Backends) -> dict[str, AudioLoader | Diarizer | Transcriber | NERDetector]:
+    """The backends the job created, by kind."""
+    created: dict[str, AudioLoader | Diarizer | Transcriber | NERDetector | None] = {
         "audio_loader": backends.audio_loader,
         "diarizer": backends.diarizer,
         "transcriber": backends.transcriber,
         "ner": backends.ner,
     }
-    return {kind: b.model_version for kind, b in created.items() if b is not None}
+    return {kind: b for kind, b in created.items() if b is not None}
+
+
+def _model_versions(backends: Backends) -> dict[str, str]:
+    """Model version reported by each backend the job created."""
+    return {kind: b.model_version for kind, b in _created(backends).items()}
 
 
 def _run_file(

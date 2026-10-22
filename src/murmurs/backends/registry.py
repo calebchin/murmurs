@@ -27,6 +27,8 @@ from typing import Any
 
 from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber
 from murmurs.backends.audio import TorchcodecAudioLoader
+from murmurs.backends.nemotron import MODEL_ID as NEMOTRON_ID
+from murmurs.backends.nemotron import NemotronDiarizer, nemotron_weights
 from murmurs.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
@@ -176,6 +178,7 @@ register(
     lambda config: TorchcodecAudioLoader(config.data.audio_extensions),
 )
 register(BackendKind.DIARIZER, STUB, lambda _: StubDiarizer())
+register(BackendKind.DIARIZER, NEMOTRON_ID, NemotronDiarizer, weights=nemotron_weights)
 register(BackendKind.TRANSCRIBER, STUB, lambda _: StubTranscriber())
 register(BackendKind.NER, STUB, lambda _: StubNERDetector())
 register(BackendKind.LLM, STUB, lambda _: StubLLMClient())
