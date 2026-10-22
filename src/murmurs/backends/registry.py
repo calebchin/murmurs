@@ -37,6 +37,8 @@ from murmurs.backends.gptoss import MODEL_ID as GPT_OSS_ID
 from murmurs.backends.gptoss import create_gpt_oss, gpt_oss_prepared, gpt_oss_weights
 from murmurs.backends.nemotron import MODEL_ID as NEMOTRON_ID
 from murmurs.backends.nemotron import NemotronDiarizer, nemotron_weights
+from murmurs.backends.openmed_ner import MODEL_ID as OPENMED_ID
+from murmurs.backends.openmed_ner import OpenMedNER, openmed_weights
 from murmurs.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
@@ -213,6 +215,7 @@ register(
     prepared=crisperwhisper_prepared,
 )
 register(BackendKind.NER, STUB, lambda _: StubNERDetector())
+register(BackendKind.NER, OPENMED_ID, OpenMedNER, weights=openmed_weights)
 register(BackendKind.LLM, STUB, lambda _: StubLLMClient())
 register(
     BackendKind.LLM,

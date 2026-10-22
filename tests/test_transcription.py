@@ -31,7 +31,7 @@ from murmurs.backends.crisper import (
     words_to_transcript,
 )
 from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import StubAudioLoader, StubDiarizer, StubNERDetector
+from murmurs.backends.stubs import StubAudioLoader, StubDiarizer, StubLLMClient, StubNERDetector
 from murmurs.cli import app
 from murmurs.config import JobConfig, Stage, load_config
 from murmurs.errors import BackendSetupError, PipelineError
@@ -210,6 +210,7 @@ def _run_with(config: JobConfig, transcriber: CrisperWhisperTranscriber) -> tupl
         diarizer=StubDiarizer(),
         transcriber=transcriber,
         ner=StubNERDetector(),
+        llm=StubLLMClient(response={"entities": []}),
     )
     summary = run_job(config, "job", backends=backends, console=console)
     return summary, console.getvalue()

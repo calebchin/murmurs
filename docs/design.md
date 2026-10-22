@@ -162,7 +162,7 @@ Redactions use indexed tags, stay consistent across chunks through running metad
 
 **Gaps the LLM must cover**
 
-- The NER label set has no organization, company, school, hospital or other facility label. These are common in childhood (CECA) and life-events (LEDS) interviews.
+- The NER label set has `company_name` but no school, hospital or other facility label. These are common in childhood (CECA) and life-events (LEDS) interviews.
 - Names are split into `first_name` and `last_name`, so nicknames and partial references need the LLM.
 - The NER model was trained on synthetic PII text, not conversational transcripts, and its model card calls it experimental. It needs validating on the synthetic CECA/LEDS set.
 
@@ -366,4 +366,4 @@ Testing uses example audio provided by the project owner, since the pipeline mus
 - [ ] How confidence scoring evolves beyond detector agreement
 - [x] Confirm CrisperWhisper decodes .m4a from a file path. **Resolved (Oct 20, 2026):** moot. Our loader always decodes with torchcodec and passes a numpy array to every backend, so CrisperWhisper never sees a file path.
 - [ ] Target hardware: GPT-OSS 120B needs roughly one 80 GB GPU; is a smaller fallback model needed for other machines?
-- [ ] Which NER labels are redacted, flagged or ignored for CECA and LEDS interviews
+- [x] Which NER labels are redacted, flagged or ignored for CECA and LEDS interviews. **Provisionally answered (Oct 22, 2026, D10 in `docs/tasks/phase2.md`):** names, organizations, locations, contact details and ID numbers are redacted; ages, dates and sensitive attributes (religion, sexuality, ethnicity, politics, occupation, education, employment, gender) are flagged for review, since they are central to these interviews; times, countries, languages and digital-only labels are ignored. The data owners can change this in `deid.entity_types`.

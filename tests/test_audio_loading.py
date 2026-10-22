@@ -13,7 +13,7 @@ from fixtures.audio import tone_wav_bytes, write_tone, write_tone_encoded, write
 
 from murmurs.backends import Waveform
 from murmurs.backends.audio import DECODE_FAILED, TARGET_SAMPLE_RATE, TorchcodecAudioLoader
-from murmurs.backends.stubs import StubDiarizer, StubNERDetector, StubTranscriber
+from murmurs.backends.stubs import StubDiarizer, StubLLMClient, StubNERDetector, StubTranscriber
 from murmurs.config import JobConfig, Stage, load_config
 from murmurs.errors import PipelineError
 from murmurs.models import AudioInfo, RedactionSpan, StageStatus, ValidationResult
@@ -64,6 +64,7 @@ def _backends(loader: TorchcodecAudioLoader, ner: StubNERDetector | None = None)
         diarizer=StubDiarizer(),
         transcriber=StubTranscriber(),
         ner=ner or StubNERDetector(),
+        llm=StubLLMClient(response={"entities": []}),
     )
 
 

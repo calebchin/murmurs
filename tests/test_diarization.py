@@ -17,7 +17,13 @@ from murmurs.backends import registry
 from murmurs.backends.device import resolve_device
 from murmurs.backends.nemotron import MODEL_ID, WEIGHT_FILES, segments_to_turns
 from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import StubAudioLoader, StubDiarizer, StubNERDetector, StubTranscriber
+from murmurs.backends.stubs import (
+    StubAudioLoader,
+    StubDiarizer,
+    StubLLMClient,
+    StubNERDetector,
+    StubTranscriber,
+)
 from murmurs.cli import app
 from murmurs.config import CURRENT_SCHEMA_VERSION, Device, Stage, load_config, validate_config
 from murmurs.errors import BackendSetupError
@@ -167,6 +173,7 @@ def test_runner_logs_cpu_fallback(stub_job: StubJob) -> None:
         diarizer=_CpuFallbackDiarizer(),
         transcriber=StubTranscriber(),
         ner=StubNERDetector(),
+        llm=StubLLMClient(response={"entities": []}),
     )
     run_job(config, "job", backends=backends, console=console)
     assert "device_fallback_cpu" in console.getvalue()

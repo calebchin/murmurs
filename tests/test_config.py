@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from murmurs.cli import app
 from murmurs.config import (
     CURRENT_SCHEMA_VERSION,
+    PROVISIONAL_ENTITY_TYPES,
     ConfigError,
     EntityAction,
     JobConfig,
@@ -43,7 +44,7 @@ def _load_error(tmp_path: Path, raw: dict[str, Any]) -> ConfigError:
 def test_example_config_loads() -> None:
     config = load_config(EXAMPLE)
     assert isinstance(config, JobConfig)
-    assert [e.name for e in config.deid.entity_types] == ["PERSON", "LOCATION"]
+    assert list(config.deid.entity_types) == list(PROVISIONAL_ENTITY_TYPES)  # D10
     assert config.deid.entity_types[0].action is EntityAction.REDACT
     assert config.transcription.backend is TranscriptionBackend.AUTO
 

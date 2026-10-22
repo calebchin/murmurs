@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from murmurs.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
+    StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
@@ -46,6 +47,7 @@ class Stubs:
             diarizer=self.diarizer,
             transcriber=self.transcriber,
             ner=self.ner,
+            llm=StubLLMClient(response={"entities": []}),
         )
 
     @property
@@ -93,6 +95,8 @@ def test_stage_range_produces_only_those_artifacts(stub_job: StubJob) -> None:
             "transcribe.verbatim.txt",
             "transcribe.intended.json",
             "transcribe.intended.txt",
+            "transcribe.verbatim.words.tsv",
+            "transcribe.intended.words.tsv",
         }
 
 

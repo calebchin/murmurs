@@ -146,7 +146,8 @@ def test_phase1_end_to_end(job: tuple[Path, Path, Path]) -> None:
     third = _run(config_path, stubs)
     consoles.append(third.stdout + third.stderr)
     assert third.exit_code == 0, third.stderr
-    assert stubs.calls() == {"audio": [], "diarizer": [], "transcriber": [], "ner": [bad, bad]}
+    # PHI detection runs once per file, on the intended transcript (D9).
+    assert stubs.calls() == {"audio": [], "diarizer": [], "transcriber": [], "ner": [bad]}
     for file_id in good | {bad}:
         status = store.read_status(file_id)
         assert status is not None and set(status.stages.values()) == {StageStatus.DONE}

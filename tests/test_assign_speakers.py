@@ -10,6 +10,7 @@ from conftest import SENTINEL, StubJob
 from murmurs.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
+    StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
@@ -198,6 +199,7 @@ def _backends(text: str = "hello there general kenobi") -> Backends:
         diarizer=StubDiarizer(turn_s=1.0),
         transcriber=StubTranscriber(text=text),
         ner=StubNERDetector(),
+        llm=StubLLMClient(response={"entities": []}),
     )
 
 

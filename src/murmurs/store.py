@@ -6,6 +6,8 @@ Layout under ``<output_dir>/<job_id>/``::
     files/<file_id>/status.json
     files/<file_id>/<stage>[.<variant>].json
     files/<file_id>/<stage>[.<variant>].txt     (plain-text transcript export)
+    files/<file_id>/<stage>[.<variant>].words.tsv  (one word per line, with times)
+    transcripts/<input name>-<file id>/          (readable copies of finished transcripts)
 
 Every write is atomic and is refused if it would land inside the input directory.
 """
@@ -77,11 +79,17 @@ def atomic_writer(path: Path) -> Iterator[IO[str]]:
         raise
 
 
-def transcript_to_text(transcript: Transcript) -> str:
-    """Plain-text rendering: one line per segment, with speaker and start time if known.
+def canonical_text(transcript: Transcript) -> str:
+    """The transcript's canonical text (D9): segment texts joined with newlines.
 
-    Placeholder format; the canonical rendering is defined in phase 2 (P2-08).
+    Deidentification spans and evaluation labels are character offsets into this text.
+    Speaker labels and timestamps are not part of it; they are added only for display.
     """
+    return "\n".join(segment.text for segment in transcript.segments)
+
+
+def transcript_to_text(transcript: Transcript) -> str:
+    """Readable rendering: one line per segment, with start time and speaker if known."""
     lines = []
     for segment in transcript.segments:
         minutes, seconds = divmod(segment.start, 60)
@@ -89,6 +97,24 @@ def transcript_to_text(transcript: Transcript) -> str:
         speaker = f" {segment.speaker}:" if segment.speaker else ""
         lines.append(f"{stamp}{speaker} {segment.text}")
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+WORDS_TSV_HEADER = "start\tend\tspeaker\tword"
+_TSV_ESCAPES = str.maketrans({"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r"})
+
+
+def transcript_to_words_tsv(transcript: Transcript) -> str:
+    """One word per line: start and end in seconds (3 decimals), speaker, word.
+
+    Backslashes, tabs and line breaks inside a word are escaped (``\\``, ``\t``,
+    ``\n``, ``\r``) so they cannot break the columns or rows.
+    """
+    lines = [WORDS_TSV_HEADER]
+    for segment in transcript.segments:
+        for word in segment.words:
+            text = word.text.translate(_TSV_ESCAPES)
+            lines.append(f"{word.start:.3f}\t{word.end:.3f}\t{word.speaker or ''}\t{text}")
+    return "\n".join(lines) + "\n"
 
 
 class ArtifactStore:
@@ -154,6 +180,35 @@ class ArtifactStore:
         """Atomically write the plain-text export of a transcript next to its JSON."""
         path = self.artifact_path(file_id, stage, variant, suffix=".txt")
         self._write_text(path, transcript_to_text(transcript))
+        return path
+
+    def write_text(
+        self, file_id: str, stage: Stage, variant: str, text: str, suffix: str = ".txt"
+    ) -> Path:
+        """Atomically write a text artifact, e.g. ``detect_phi.intended.clean.txt``."""
+        path = self.artifact_path(file_id, stage, variant, suffix=suffix)
+        self._write_text(path, text)
+        return path
+
+    def write_words_tsv(
+        self, file_id: str, stage: Stage, transcript: Transcript, variant: str | None = None
+    ) -> Path:
+        """Atomically write the word-level TSV of a transcript next to its JSON."""
+        path = self.artifact_path(file_id, stage, variant, suffix=".words.tsv")
+        self._write_text(path, transcript_to_words_tsv(transcript))
+        return path
+
+    # --- job-level exports ----------------------------------------------------------
+
+    @property
+    def transcripts_dir(self) -> Path:
+        """Folder of readable transcript copies, one subfolder per input file."""
+        return self.job_dir / "transcripts"
+
+    def write_export(self, folder: str, name: str, text: str) -> Path:
+        """Atomically write ``transcripts/<folder>/<name>``."""
+        path = self.transcripts_dir / _checked_name(folder, "folder") / _checked_name(name, "name")
+        self._write_text(path, text)
         return path
 
     # --- status and manifest ------------------------------------------------------

@@ -72,6 +72,7 @@ def test_manifest_records_versions_hashes_and_statuses(stub_job: StubJob) -> Non
         "diarizer": "stub",
         "transcriber": "stub",
         "ner": "stub",
+        "llm": "stub",  # detect_phi uses the LLM (P3-02)
     }
     assert set(manifest.input_hashes) == set(summary.done)
     assert all(h.startswith(fid) for fid, h in manifest.input_hashes.items())

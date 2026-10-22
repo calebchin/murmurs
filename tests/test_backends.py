@@ -185,7 +185,10 @@ def test_registry_creates_stubs_from_config() -> None:
 
 
 def test_registry_unknown_name_fails_setup() -> None:
-    config = load_config(EXAMPLE)  # real model names; the NER model is not registered yet
+    config = load_config(EXAMPLE)
+    config = config.model_copy(
+        update={"deid": config.deid.model_copy(update={"ner_model": "not-a-registered-model"})}
+    )
     with pytest.raises(BackendSetupError, match="no ner backend named"):
         registry.create_ner_detector(config)
 

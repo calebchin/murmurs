@@ -40,19 +40,55 @@ deid:
   prompt_path: null
   redaction_threshold: 0.5
   flag_edge_cases: true
-  # Illustrative only. Which NER labels map to which entity type, and whether each is
-  # redacted, flagged or ignored, is an open question in docs/design.md.
+  # Provisional tag set (D10 in docs/tasks/phase2.md); the data owners decide the final one.
+  # action: redact (replace with the tag), flag (mark for review) or ignore. NER labels not
+  # listed under any type are ignored.
   entity_types:
     - name: PERSON
       tag: "[PERSON_{n}]"
-      description: Names of people, including first names, nicknames and partial names.
-      ner_labels: [first_name, last_name]
+      description: "Names of people: full, first or last names, nicknames and partial names (for example 'Mrs. Ruiz' or 'the Kowalskis')."
+      ner_labels: [first_name, last_name, user_name]
+      action: redact
+    - name: ORGANIZATION
+      tag: "[ORGANIZATION_{n}]"
+      description: "Named organizations and institutions: companies and employers, schools and colleges, hospitals and clinics, churches, clubs, care homes and other named facilities."
+      ner_labels: [company_name]
       action: redact
     - name: LOCATION
       tag: "[LOCATION_{n}]"
-      description: Cities, towns, streets, addresses and other named places.
-      ner_labels: [city, street_address]
+      description: "Named places smaller than a country: street addresses, streets, neighbourhoods, towns, cities, counties, states and postcodes."
+      ner_labels: [street_address, city, county, state, postcode, coordinate]
       action: redact
+    - name: CONTACT
+      tag: "[CONTACT_{n}]"
+      description: "Phone and fax numbers, email addresses and web addresses."
+      ner_labels: [phone_number, email, fax_number, url]
+      action: redact
+    - name: ID
+      tag: "[ID_{n}]"
+      description: "Identifying numbers: social security, national ID, medical record, health plan, account, licence, vehicle, device, employee, customer, tax and case numbers."
+      ner_labels: [ssn, national_id, medical_record_number, health_plan_beneficiary_number, account_number, certificate_license_number, license_plate, vehicle_identifier, device_identifier, employee_id, customer_id, tax_id, unique_id]
+      action: redact
+    - name: AGE
+      tag: "[AGE_{n}]"
+      description: "A person's age."
+      ner_labels: [age]
+      action: flag
+    - name: DATE
+      tag: "[DATE_{n}]"
+      description: "Specific dates and date references: days, months, years, birthdays."
+      ner_labels: [date, date_of_birth, date_time]
+      action: flag
+    - name: SENSITIVE_ATTRIBUTE
+      tag: "[SENSITIVE_ATTRIBUTE_{n}]"
+      description: "Religion, sexuality, race or ethnicity, political views and gender."
+      ner_labels: [religious_belief, sexuality, race_ethnicity, political_view, gender]
+      action: flag
+    - name: SOCIOECONOMIC
+      tag: "[SOCIOECONOMIC_{n}]"
+      description: "Occupation, education level and employment status."
+      ner_labels: [occupation, education_level, employment_status]
+      action: flag
 
 compute:
   device: auto          # auto | cuda | cpu

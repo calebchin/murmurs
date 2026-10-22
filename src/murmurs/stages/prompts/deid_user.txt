@@ -1,0 +1,13 @@
+Entity types:
+$entity_types
+
+The transcript excerpt is below, one numbered line per speaker turn. Lines that start with CONTEXT are only there so you can see nearby turns: never report entities from CONTEXT lines.
+
+$transcript
+
+List every entity in the lines that do not start with CONTEXT. For each give:
+- line: the line number;
+- text: the entity exactly as written in that line, without surrounding words;
+- entity_type: one of the entity types above.
+
+Report each distinct entity once per line. If there are none, return an empty list.

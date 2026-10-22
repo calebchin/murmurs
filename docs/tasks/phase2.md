@@ -14,6 +14,10 @@ The pipeline must run on a machine with no network connection (D11). Every real 
 
 The design doc was silent or had an open question on each item below. Tasks that depend on an open item must not start until the project owner records a decision here (and, for design open questions, ticks the box in `docs/design.md`). Do not choose an answer yourself.
 
+### MVP reorder (Oct 22, 2026)
+
+To reach a testable MVP sooner, the remaining work runs in this order: P2-08's word-level TSV and a job-level transcript export (no sample runs or reviewer folder yet), a reduced P2-09 (one CECA and one LEDS interview), then a minimal phase 3 (`docs/tasks/phase3.md`), then an offline end-to-end run with throughput. Everything else in P2-08, P2-09 and P2-10 is deferred, not dropped.
+
 ### Resolved
 
 | ID | Question | Decision | Affects |
@@ -38,15 +42,15 @@ The design doc was silent or had an open question on each item below. Tasks that
 | D7 | **Default for `diarization.llm_correction`.** | Stays `true`. A default run that reaches `assign_speakers` loads GPT-OSS 120B (D6, D22), so its weights and server environment must be set up with `murmurs models download`. | P2-07 |
 | D23 | **Interview type in the correction prompt.** P2-07 asked for CECA or LEDS context, but nothing records a file's interview type. | Not yet: the speaker-correction prompt uses generic interviewer/participant context. Interview type is added when prompts are tuned on real interviews. | P2-07 |
 | D24 | **Correcting both transcript modes.** | The LLM corrects one transcript per file: intended if configured, else verbatim. In the other mode, each word that overlaps (by time, most overlap, ties to the earlier word) a word whose speaker the LLM changed takes that new speaker; every other word keeps its rule-based speaker. One LLM pass per file, and both modes stay consistent. | P2-07 |
+| D8 | **Evaluation set form and authorship.** | MVP (Oct 22, 2026): text transcripts only, written by Claude, one CECA and one LEDS interview (about 2,000–3,000 words each) with fictional PHI marked inline and committed under `eval/synthetic/`. The full set's size, authorship and any synthetic audio are decided after the MVP. | P2-09 |
+| D9 | **What ground-truth offsets point into.** | Deidentification and evaluation offsets use the final (LLM-corrected) **intended** transcript (verbatim in a verbatim-only job). Its canonical text is the segment texts joined with `\n`; speaker labels and timestamps are display only (`murmurs.store.canonical_text`). Deidentifying verbatim comes after the MVP. | P2-09, phase 3 |
+| D10 | **Evaluation tag set and NER label actions.** | Provisional, until the data owners decide. Redact: PERSON (first_name, last_name, user_name), ORGANIZATION (company_name; the LLM covers schools, hospitals and other facilities), LOCATION (street_address, city, county, state, postcode, coordinate), CONTACT (phone_number, email, fax_number, url), ID (ssn, national_id, medical_record_number, health_plan_beneficiary_number, account_number, certificate_license_number, license_plate, vehicle_identifier, device_identifier, employee_id, customer_id, tax_id, unique_id). Flag for review: AGE (age), DATE (date, date_of_birth, date_time), and religious_belief, sexuality, race_ethnicity, political_view, occupation, education_level, employment_status, gender. Ignore: time, country, language and digital-only labels. Lives in `deid.entity_types` (see `examples/job.yaml`). | P2-09, phase 3 |
 
 ### Open
 
 | ID | Question | Blocks |
 | --- | --- | --- |
-| D8 | **Evaluation set form and authorship.** Text transcripts only, or also synthetic audio (e.g. TTS) to test the full pipeline? Who writes the interviews: the project owner, an LLM run locally, or both? How many CECA and LEDS interviews make the set "complete"? | P2-09 |
-| D9 | **What ground-truth offsets point into.** Redaction spans use character offsets, but the design does not define which text: the intended or verbatim transcript, and which plain-text rendering (with or without speaker labels and timestamps). Phase 3 will use the same answer. | P2-08, P2-09 |
 | D20 | **Diarization/word-timing lag.** On the 53-minute podcast, Nemotron's speaker changes trail CrisperWhisper's word times by about 0.1 s (median 0.08 s, one Nemotron encoder frame), so 29–34 of 243 speaker changes leave a sentence-opening word with the previous speaker. Shifting turns 0.08–0.12 s earlier before assignment removed about two-thirds of these (34 → 11–14) and halved the opposite error (10 → 4); larger shifts made things worse. Add a `diarization.turn_offset_s` config field (and with what default, tuned on which audio), rely on the P2-07 LLM pass, or both? Needs interview audio to tune. | P2-05 follow-up, P2-07 |
-| D10 | **Evaluation tag set.** The data owners set the deidentification standard. Which entity types (and NER label mappings) do ground-truth labels use? Related to the design open question on NER label actions. | P2-09 |
 
 ---
 
@@ -301,6 +305,8 @@ The design doc was silent or had an open question on each item below. Tasks that
 
 ## P2-08: Sample runs for reviewers
 
+**Status:** deferred after the MVP, except the word-level TSV export, the canonical rendering (`canonical_text`, D9) and a job-level `transcripts/` export of corrected and rule-based transcripts, which are done now.
+
 **Goal:** a sample run produces transcripts a reviewer can read and judge, plus throughput numbers.
 
 **Depends on:** D9 (for the plain-text rendering only).
@@ -325,6 +331,8 @@ The design doc was silent or had an open question on each item below. Tasks that
 ---
 
 ## P2-09: Synthetic evaluation set
+
+**Status:** reduced for the MVP (D8): two interviews (one CECA, one LEDS) under `eval/synthetic/`, the `GroundTruthLabel`/`GroundTruthSet` models, the loader and validator, and `murmurs eval check`. Generation tooling and the full set come after the MVP.
 
 **Goal:** CECA and LEDS synthetic interviews with planted PHI and ground-truth labels, ready for phase 3.
 

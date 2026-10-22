@@ -219,6 +219,69 @@ class SpeakerCorrection(_Model):
     """Words whose speaker differs from the rule-based assignment, per mode."""
 
 
+class DeidReport(_Model):
+    """Stage 6 report on PHI detection (P3-03): counts only, never text."""
+
+    schema_version: Literal[1] = 1
+    file_id: str
+    mode: TranscriptMode
+    n_chunks: int = Field(0, ge=0)
+    failed_chunks: int = Field(0, ge=0)
+    """Chunks whose LLM output stayed invalid after retries."""
+    llm_proposed: int = Field(0, ge=0)
+    llm_rejected: dict[str, int] = {}
+    """Rejected LLM entities by reason (e.g. ``"not_found"``)."""
+    llm_spans: int = Field(0, ge=0)
+    """Spans from LLM entities, before merging, including propagated occurrences."""
+    propagated: int = Field(0, ge=0)
+    """Of ``llm_spans``, occurrences found elsewhere in the text for an accepted entity."""
+    ner_spans: int = Field(0, ge=0)
+    ner_ignored: int = Field(0, ge=0)
+    """NER spans whose label maps to no entity type or to an ignored one."""
+    spans: int = Field(0, ge=0)
+    """Spans after merging."""
+    both_detectors: int = Field(0, ge=0)
+    redacted: int = Field(0, ge=0)
+    """Spans replaced by a tag in the clean text."""
+    flagged: int = Field(0, ge=0)
+    by_type: dict[str, int] = {}
+
+
+# --- Evaluation set ---------------------------------------------------------------------
+
+
+class InterviewType(StrEnum):
+    """The interview styles the evaluation set covers."""
+
+    CECA = "CECA"
+    LEDS = "LEDS"
+
+
+class GroundTruthLabel(_Model):
+    """One planted PHI item in an evaluation transcript (P2-09).
+
+    ``start``/``end`` are character offsets into the transcript's canonical text (D9),
+    end exclusive; ``text`` must equal that slice.
+    """
+
+    id: str
+    start: int = Field(ge=0)
+    end: int
+    entity_type: str
+    text: str
+    note: str = ""
+
+
+class GroundTruthSet(_Model):
+    """One synthetic evaluation interview with its ground-truth labels."""
+
+    schema_version: Literal[1] = 1
+    set_id: str
+    interview_type: InterviewType
+    transcript: Transcript
+    labels: list[GroundTruthLabel]
+
+
 # --- Redactions and review ------------------------------------------------------------
 
 
@@ -388,6 +451,8 @@ TOP_LEVEL_ARTIFACTS: tuple[type[BaseModel], ...] = (
     Diarization,
     Transcript,
     SpeakerCorrection,
+    DeidReport,
+    GroundTruthSet,
     RedactionLayer,
     FileStatus,
     RunManifest,

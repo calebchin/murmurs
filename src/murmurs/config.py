@@ -152,6 +152,90 @@ class EntityType(_Model):
     action: EntityAction = EntityAction.REDACT
 
 
+def _entity(name: str, description: str, ner_labels: list[str], action: EntityAction) -> EntityType:
+    return EntityType(
+        name=name,
+        tag=f"[{name}_{{n}}]",
+        description=description,
+        ner_labels=ner_labels,
+        action=action,
+    )
+
+
+PROVISIONAL_ENTITY_TYPES: tuple[EntityType, ...] = (
+    _entity(
+        "PERSON",
+        "Names of people: full, first or last names, nicknames and partial names "
+        "(for example 'Mrs. Ruiz' or 'the Kowalskis').",
+        ["first_name", "last_name", "user_name"],
+        EntityAction.REDACT,
+    ),
+    _entity(
+        "ORGANIZATION",
+        "Named organizations and institutions: companies and employers, schools and "
+        "colleges, hospitals and clinics, churches, clubs, care homes and other named "
+        "facilities.",
+        ["company_name"],
+        EntityAction.REDACT,
+    ),
+    _entity(
+        "LOCATION",
+        "Named places smaller than a country: street addresses, streets, neighbourhoods, "
+        "towns, cities, counties, states and postcodes.",
+        ["street_address", "city", "county", "state", "postcode", "coordinate"],
+        EntityAction.REDACT,
+    ),
+    _entity(
+        "CONTACT",
+        "Phone and fax numbers, email addresses and web addresses.",
+        ["phone_number", "email", "fax_number", "url"],
+        EntityAction.REDACT,
+    ),
+    _entity(
+        "ID",
+        "Identifying numbers: social security, national ID, medical record, health plan, "
+        "account, licence, vehicle, device, employee, customer, tax and case numbers.",
+        [
+            "ssn",
+            "national_id",
+            "medical_record_number",
+            "health_plan_beneficiary_number",
+            "account_number",
+            "certificate_license_number",
+            "license_plate",
+            "vehicle_identifier",
+            "device_identifier",
+            "employee_id",
+            "customer_id",
+            "tax_id",
+            "unique_id",
+        ],
+        EntityAction.REDACT,
+    ),
+    _entity("AGE", "A person's age.", ["age"], EntityAction.FLAG),
+    _entity(
+        "DATE",
+        "Specific dates and date references: days, months, years, birthdays.",
+        ["date", "date_of_birth", "date_time"],
+        EntityAction.FLAG,
+    ),
+    _entity(
+        "SENSITIVE_ATTRIBUTE",
+        "Religion, sexuality, race or ethnicity, political views and gender.",
+        ["religious_belief", "sexuality", "race_ethnicity", "political_view", "gender"],
+        EntityAction.FLAG,
+    ),
+    _entity(
+        "SOCIOECONOMIC",
+        "Occupation, education level and employment status.",
+        ["occupation", "education_level", "employment_status"],
+        EntityAction.FLAG,
+    ),
+)
+"""The provisional tag set (D10), used by ``examples/job.yaml`` and the MVP evaluation set.
+The data owners decide the final set. NER labels not mapped to any type are ignored."""
+
+
 class LLMServerConfig(_Model):
     """Settings for the local vLLM server that runs the LLM (D22).
 

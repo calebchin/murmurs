@@ -20,14 +20,14 @@ from murmurs.errors import PipelineError
 from murmurs.models import (
     AudioInfo,
     Diarization,
-    RedactionLayer,
     SpeakerCorrection,
     Transcript,
     TranscriptMode,
-    TranscriptRef,
 )
 from murmurs.stages.assign import assign_speakers as assign_words
 from murmurs.stages.correction import correct_modes, prompt_hash
+from murmurs.stages.deid import deid_mode, deidentify, render_annotated, render_clean
+from murmurs.stages.deid import prompt_hash as deid_prompt_hash
 from murmurs.store import ArtifactStore
 
 M = TypeVar("M", bound=BaseModel)
@@ -38,6 +38,8 @@ RULE_BASED = "rule_based"
 """Variant suffix of the rule-based transcripts ``assign_speakers.<mode>.rule_based``."""
 CORRECTION_REPORT = "correction"
 """Variant of the speaker-correction report, ``assign_speakers.correction``."""
+DEID_REPORT = "report"
+"""Variant of the PHI detection report, ``detect_phi.report``."""
 INVALID_INPUT = "INVALID_INPUT"
 
 DEPENDS: dict[Stage, tuple[Stage, ...]] = {
@@ -119,7 +121,10 @@ class StageContext:
 
 
 def stage_variants(stage: Stage, modes: tuple[TranscriptMode, ...]) -> list[str | None]:
-    """The artifact variants a stage writes: one per mode, or a single unnamed one."""
+    """The artifact variants a stage must have written for it to count as complete: one
+    per mode, the deidentified mode only for ``detect_phi`` (D9), or a single unnamed one."""
+    if stage is Stage.DETECT_PHI:
+        return [deid_mode(modes).value]
     return [mode.value for mode in modes] if stage in PER_MODE_STAGES else [None]
 
 
@@ -142,7 +147,9 @@ def stage_config(stage: Stage, config: JobConfig) -> dict[str, Any]:
             return values
         case Stage.DETECT_PHI:
             # llm_server settings change speed and memory, not output
-            return config.deid.model_dump(mode="json", exclude={"llm_server"})
+            values = config.deid.model_dump(mode="json", exclude={"llm_server"})
+            values["prompt"] = deid_prompt_hash()
+            return values
 
 
 # --- stage implementations ---------------------------------------------------------------
@@ -186,6 +193,7 @@ def transcribe(ctx: StageContext) -> None:
         ctx.store.write_transcript_text(
             ctx.file_id, Stage.TRANSCRIBE, results[mode], variant=mode.value
         )
+        ctx.store.write_words_tsv(ctx.file_id, Stage.TRANSCRIBE, results[mode], variant=mode.value)
 
 
 def assign_speakers(ctx: StageContext) -> None:
@@ -220,24 +228,53 @@ def assign_speakers(ctx: StageContext) -> None:
         ctx.store.write_transcript_text(
             ctx.file_id, Stage.ASSIGN_SPEAKERS, rule_based[mode], variant=variant
         )
+        ctx.store.write_words_tsv(
+            ctx.file_id, Stage.ASSIGN_SPEAKERS, rule_based[mode], variant=variant
+        )
         ctx.store.write(ctx.file_id, Stage.ASSIGN_SPEAKERS, final[mode], variant=mode.value)
         ctx.store.write_transcript_text(
+            ctx.file_id, Stage.ASSIGN_SPEAKERS, final[mode], variant=mode.value
+        )
+        ctx.store.write_words_tsv(
             ctx.file_id, Stage.ASSIGN_SPEAKERS, final[mode], variant=mode.value
         )
     ctx.store.write(ctx.file_id, Stage.ASSIGN_SPEAKERS, report, variant=CORRECTION_REPORT)
 
 
 def detect_phi(ctx: StageContext) -> None:
-    """Propose redactions. Placeholder until phase 3: NER over the joined segment text."""
-    ner = _need(ctx.backends.ner)
-    for mode in ctx.modes:
-        transcript = ctx.read(Stage.ASSIGN_SPEAKERS, Transcript, variant=mode.value)
-        text = " ".join(segment.text for segment in transcript.segments)
-        layer = RedactionLayer(
-            transcript=TranscriptRef(file_id=ctx.file_id, mode=mode),
-            spans=ner.detect(text, ctx.file_id),
-        )
-        ctx.store.write(ctx.file_id, Stage.DETECT_PHI, layer, variant=mode.value)
+    """Propose redactions on the final transcript of one mode (D9) with NER and the LLM.
+
+    Writes the redaction layer (``<mode>.json``), an annotated rendering for reviewers
+    (``<mode>.annotated.txt``), the clean rendering (``<mode>.clean.txt``) and a
+    counts-only ``report``. Renderings come from the transcript plus the layer; the
+    transcript itself is never changed.
+    """
+    mode = deid_mode(ctx.modes)
+    deid = ctx.config.deid
+    transcript = ctx.read(Stage.ASSIGN_SPEAKERS, Transcript, variant=mode.value)
+    layer, report = deidentify(
+        transcript,
+        _need(ctx.backends.ner),
+        _need(ctx.backends.llm),
+        deid.entity_types,
+        ctx.file_id,
+        deid.llm_server.max_model_len,
+        deid.redaction_threshold,
+    )
+    ctx.store.write(ctx.file_id, Stage.DETECT_PHI, layer, variant=mode.value)
+    ctx.store.write_text(
+        ctx.file_id,
+        Stage.DETECT_PHI,
+        f"{mode.value}.annotated",
+        render_annotated(transcript, layer),
+    )
+    ctx.store.write_text(
+        ctx.file_id,
+        Stage.DETECT_PHI,
+        f"{mode.value}.clean",
+        render_clean(transcript, layer, deid.entity_types, deid.redaction_threshold),
+    )
+    ctx.store.write(ctx.file_id, Stage.DETECT_PHI, report, variant=DEID_REPORT)
 
 
 STAGE_FUNCTIONS: dict[Stage, Callable[[StageContext], None]] = {

@@ -12,10 +12,14 @@ from murmurs.models import (
     AudioInfo,
     AuditAction,
     AuditEvent,
+    DeidReport,
     DetectorSource,
     Diarization,
     ErrorInfo,
     FileStatus,
+    GroundTruthLabel,
+    GroundTruthSet,
+    InterviewType,
     RedactionLayer,
     RedactionSpan,
     ReviewState,
@@ -90,6 +94,31 @@ def _examples() -> list[BaseModel]:
         ),
         Diarization(file_id="f1", turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=1.0)]),
         _transcript(),
+        DeidReport(
+            file_id="f1",
+            mode=TranscriptMode.INTENDED,
+            n_chunks=2,
+            llm_proposed=5,
+            llm_rejected={"not_found": 1},
+            llm_spans=6,
+            propagated=2,
+            ner_spans=4,
+            spans=7,
+            both_detectors=3,
+            redacted=5,
+            flagged=2,
+            by_type={"PERSON": 4, "DATE": 2, "ORGANIZATION": 1},
+        ),
+        GroundTruthSet(
+            set_id="ceca_mvp",
+            interview_type=InterviewType.CECA,
+            transcript=_transcript(),
+            labels=[
+                GroundTruthLabel(
+                    id="ceca_mvp-001", start=0, end=5, entity_type="PERSON", text="hello"
+                )
+            ],
+        ),
         SpeakerCorrection(
             file_id="f1",
             enabled=True,

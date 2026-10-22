@@ -342,6 +342,7 @@ def _job(
             files,
             diarization={"llm_correction": correction_on},
             deid={"llm_model": "scripted"},
+            stages={"end": "assign_speakers"},  # these tests are about stage 5 only
         )
     )
     return config
@@ -397,7 +398,9 @@ def test_correction_off_never_creates_the_llm(stub_job: StubJob) -> None:
         final = store.read(file_id, Stage.ASSIGN_SPEAKERS, Transcript, INT.value)
         rule = store.read(file_id, Stage.ASSIGN_SPEAKERS, Transcript, f"{INT.value}.rule_based")
         assert final == rule
-    assert BackendKind.LLM not in backend_kinds(list(Stage), config)
+    stages_through_assignment = [s for s in Stage if s is not Stage.DETECT_PHI]
+    assert BackendKind.LLM not in backend_kinds(stages_through_assignment, config)
+    assert BackendKind.LLM in backend_kinds([Stage.DETECT_PHI], config)  # P3-02
 
 
 def test_correction_on_requires_the_llm_backend(stub_job: StubJob) -> None:
@@ -421,8 +424,8 @@ def test_toggling_correction_reruns_only_assignment_and_later(stub_job: StubJob)
     assert len(summary.done) == 2
     after = {p.name: p.stat().st_mtime_ns for p in store.file_dir(file_id).iterdir()}
     rewritten = {name.split(".")[0] for name, t in after.items() if before.get(name) != t}
-    assert rewritten <= {"assign_speakers", "detect_phi", "status"}
-    assert "assign_speakers" in rewritten and "detect_phi" in rewritten
+    assert rewritten <= {"assign_speakers", "status"}  # diarize and transcribe untouched
+    assert "assign_speakers" in rewritten
     status = store.read_status(file_id)
     assert status is not None and status.stages[Stage.DIARIZE] is StageStatus.DONE
 

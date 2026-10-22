@@ -225,14 +225,37 @@ class StageTiming(BaseModel):
     status: StageStatus
 
 
-class Metrics(BaseModel):
-    """Contents of ``metrics.json``: per-file, per-stage timings for one job."""
+class ThroughputSummary(BaseModel):
+    """Whole-job throughput: audio processed against wall time (P3-04)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    n_files: int = Field(ge=0)
+    """Files that ran at least one stage in this job."""
+    audio_s: float = Field(ge=0)
+    """Total audio duration of those files."""
+    wall_s: float = Field(ge=0)
+    """Wall time of the job's stage groups, including model loading."""
+    group_wall_s: dict[str, float] = {}
+    """Wall time per stage group, including model loading."""
+    real_time_factor: float | None = None
+    """Processing seconds per second of audio (lower is faster)."""
+    audio_hours_per_hour: float | None = None
+    """Hours of audio processed per hour of wall time (the design's throughput metric)."""
+
+
+class Metrics(BaseModel):
+    """Contents of ``metrics.json``: per-file, per-stage timings and a job summary.
+
+    (Schema 2 added ``summary``.)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
     job_id: str
     files: dict[str, dict[Stage, StageTiming]] = {}
+    summary: ThroughputSummary | None = None
 
 
 class MetricsRecorder:
@@ -257,6 +280,21 @@ class MetricsRecorder:
             status = StageStatus.DONE
         finally:
             self.record(file_id, stage, self._clock() - start, status)
+
+    def summarize(
+        self, n_files: int, audio_s: float, wall_s: float, group_wall_s: dict[str, float]
+    ) -> ThroughputSummary:
+        """Record and return the job's throughput summary."""
+        summary = ThroughputSummary(
+            n_files=n_files,
+            audio_s=round(audio_s, 3),
+            wall_s=round(wall_s, 3),
+            group_wall_s={name: round(t, 3) for name, t in group_wall_s.items()},
+            real_time_factor=round(wall_s / audio_s, 6) if audio_s > 0 else None,
+            audio_hours_per_hour=round(audio_s / wall_s, 4) if wall_s > 0 else None,
+        )
+        self.metrics.summary = summary
+        return summary
 
     def write(self, path: Path) -> None:
         """Atomically write ``metrics.json``."""

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
@@ -29,11 +31,12 @@ from murmurs.logging import (
     install_excepthook,
 )
 from murmurs.manifest import finish_manifest, sample_job_id, select_sample, start_manifest
-from murmurs.models import ErrorInfo, FileStatus, StageStatus, TranscriptMode
+from murmurs.models import AudioInfo, ErrorInfo, FileStatus, StageStatus, TranscriptMode
 from murmurs.offline import check_cached, check_prepared, enforce_offline
 from murmurs.stages import (
     DEPENDS,
     MISSING_UPSTREAM,
+    RULE_BASED,
     STAGE_FUNCTIONS,
     WAVEFORM_STAGES,
     Backends,
@@ -226,7 +229,7 @@ def stage_backend_kinds(stage: Stage, config: JobConfig) -> set[BackendKind]:
     if stage is Stage.ASSIGN_SPEAKERS and config.diarization.llm_correction:
         kinds.add(BackendKind.LLM)
     if stage is Stage.DETECT_PHI:
-        kinds.add(BackendKind.NER)
+        kinds |= {BackendKind.NER, BackendKind.LLM}
     return kinds
 
 
@@ -432,8 +435,11 @@ def run_job(
     runs = [_start_file(file, config, store, pool.backends, modes) for file in files]
     step = _Step(config, store, pool, modes, stages, hashes, logger, progress, metrics, summary)
     completed = False
+    group_wall: dict[str, float] = {}
+    job_started = time.perf_counter()
     try:
         for index, (name, group_stages) in enumerate(groups):
+            group_started = time.perf_counter()
             active = [run for run in runs if not run.failed]
             logger.info("group_start", group=name, n_files=len(active))
             for run in active:
@@ -443,8 +449,13 @@ def run_job(
                 run.ctx.release_waveform()
                 if run.failed:
                     progress.on_file_done(run.file.file_id, FileOutcome.FAILED)
-            logger.info("group_end", group=name, n_files=len(active))
             pool.close_after(index)
+            group_wall[name] = time.perf_counter() - group_started
+            logger.info(
+                "group_end", group=name, n_files=len(active), duration_s=round(group_wall[name], 3)
+            )
+        for run in runs:
+            export_transcripts(store, run.file, run.status, modes)
         for run in runs:
             if run.failed:
                 continue
@@ -454,6 +465,13 @@ def run_job(
         completed = True
     finally:
         pool.close_all()
+        processed = [run for run in runs if run.ran]
+        throughput = metrics.summarize(
+            n_files=len(processed),
+            audio_s=sum(_audio_seconds(store, run.file.file_id) for run in processed),
+            wall_s=time.perf_counter() - job_started,
+            group_wall_s=group_wall,
+        )
         metrics.write(store.job_dir / "metrics.json")
         statuses = [s for f in files if (s := store.read_status(f.file_id)) is not None]
         manifest = manifest.model_copy(
@@ -475,8 +493,50 @@ def run_job(
         n_failed=len(summary.failed),
         n_skipped=len(summary.skipped),
         count=len(summary.duplicates),
+        audio_duration_s=throughput.audio_s,
+        duration_s=throughput.wall_s,
     )
     return summary
+
+
+def _audio_seconds(store: ArtifactStore, file_id: str) -> float:
+    """A file's audio duration from its ``load_audio`` artifact, or 0 if it has none."""
+    if not store.exists(file_id, Stage.LOAD_AUDIO):
+        return 0.0
+    return store.read(file_id, Stage.LOAD_AUDIO, AudioInfo).duration_s
+
+
+def export_folder_name(file: InputFile) -> str:
+    """``<input file stem>-<first 8 characters of its file ID>``, safe as a folder name.
+
+    Input file names contain no PHI (design doc), so they can name output folders.
+    """
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "_", file.path.stem).lstrip(".") or "file"
+    return f"{stem}-{file.file_id[:8]}"
+
+
+def export_transcripts(
+    store: ArtifactStore, file: InputFile, status: FileStatus, modes: tuple[TranscriptMode, ...]
+) -> None:
+    """Copy a file's finished transcripts into ``transcripts/<folder>/``.
+
+    For each mode: ``<mode>.txt`` (final, LLM-corrected if correction ran),
+    ``<mode>.rule_based.txt`` and ``<mode>.words.tsv`` (final). Only for files whose
+    speaker assignment is done.
+    """
+    if status.stages.get(Stage.ASSIGN_SPEAKERS) is not StageStatus.DONE:
+        return
+    folder = export_folder_name(file)
+    for mode in modes:
+        sources = {
+            f"{mode.value}.txt": (mode.value, ".txt"),
+            f"{mode.value}.rule_based.txt": (f"{mode.value}.{RULE_BASED}", ".txt"),
+            f"{mode.value}.words.tsv": (mode.value, ".words.tsv"),
+        }
+        for name, (variant, suffix) in sources.items():
+            source = store.artifact_path(file.file_id, Stage.ASSIGN_SPEAKERS, variant, suffix)
+            if source.is_file():
+                store.write_export(folder, name, source.read_text(encoding="utf-8"))
 
 
 def _start_file(

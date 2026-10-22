@@ -19,6 +19,7 @@ from murmurs.backends.registry import DEFAULT_AUDIO_LOADER, BackendKind
 from murmurs.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
+    StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
@@ -356,6 +357,7 @@ def test_injected_backends_are_never_closed(stub_job: StubJob) -> None:
         diarizer=StubDiarizer(),
         transcriber=StubTranscriber(),
         ner=StubNERDetector(),
+        llm=StubLLMClient(response={"entities": []}),
     )
     run_job(config, "job", backends=backends, console=io.StringIO())
     stubs = (backends.audio_loader, backends.diarizer, backends.transcriber, backends.ner)

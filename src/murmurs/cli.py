@@ -1,6 +1,7 @@
 """Command-line interface. A thin wrapper over the ``murmurs`` library."""
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
@@ -10,11 +11,18 @@ import yaml
 from murmurs import __version__
 from murmurs.backends import registry
 from murmurs.backends.registry import BackendKind, WeightsPlan
-from murmurs.config import ConfigError, JobConfig, parse_assignment, resolve_config
+from murmurs.config import (
+    PROVISIONAL_ENTITY_TYPES,
+    ConfigError,
+    JobConfig,
+    parse_assignment,
+    resolve_config,
+)
 from murmurs.errors import SetupError
+from murmurs.evalset import EvalSetError, label_counts, load_dir
 from murmurs.offline import WeightDownloadError, cached_revision, download_weight, enforce_offline
-from murmurs.runner import EXIT_SETUP_ERROR, run_job
-from murmurs.store import StoreError
+from murmurs.runner import EXIT_SETUP_ERROR, check_weights, run_job
+from murmurs.store import StoreError, atomic_writer
 
 EXIT_INTERRUPTED = 130
 """Conventional exit code for Ctrl-C; completed stages are kept for resume."""
@@ -37,6 +45,9 @@ models_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(models_app, name="models")
+
+eval_app = typer.Typer(help="Check and score the synthetic evaluation set.", no_args_is_help=True)
+app.add_typer(eval_app, name="eval")
 
 ConfigOption = Annotated[
     Path, typer.Option("--config", "-c", help="Job config file (YAML).", show_default=False)
@@ -265,3 +276,131 @@ def _size(n_bytes: int) -> str:
         if n_bytes >= scale:
             return f"{n_bytes / scale:.1f} {unit}"
     return f"{n_bytes} B"
+
+
+OptionalConfigOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--config",
+        "-c",
+        help="Job config whose deid.entity_types to check against (default: the provisional set).",
+        show_default=False,
+    ),
+]
+
+
+@eval_app.command("check")
+def eval_check(
+    directory: Annotated[Path, typer.Argument(help="Folder of *.md evaluation interviews.")],
+    config: OptionalConfigOption = None,
+) -> None:
+    """Validate an evaluation set and print label counts (never text).
+
+    Exit code 0 if every interview is valid, 2 otherwise.
+    """
+    if config is None:
+        types = [entity.name for entity in PROVISIONAL_ENTITY_TYPES]
+    else:
+        try:
+            types = [entity.name for entity in resolve_config(config, []).deid.entity_types]
+        except ConfigError as exc:
+            _fail_config(exc)
+    try:
+        sets = load_dir(directory, types)
+    except EvalSetError as exc:
+        _fail_setup(f"invalid evaluation set: {exc}")
+    totals: dict[str, Counter[str]] = {}
+    for evalset in sets:
+        counts = label_counts(evalset)
+        words = sum(len(segment.words) for segment in evalset.transcript.segments)
+        detail = ", ".join(f"{name}={counts[name]}" for name in sorted(counts))
+        turns = len(evalset.transcript.segments)
+        typer.echo(
+            f"{evalset.set_id}  {evalset.interview_type.value}  turns={turns}"
+            f"  words={words}  labels={sum(counts.values())}  ({detail})"
+        )
+        totals.setdefault(evalset.interview_type.value, Counter()).update(counts)
+    for interview_type, counts in sorted(totals.items()):
+        typer.echo(f"total {interview_type}: labels={sum(counts.values())}")
+
+
+@eval_app.command("run")
+def eval_run(
+    directory: Annotated[Path, typer.Argument(help="Folder of *.md evaluation interviews.")],
+    config: ConfigOption,
+) -> None:
+    """Run PHI detection (NER + LLM, offline) on the evaluation set and print recall and
+    precision counts per entity type (never text).
+
+    Writes scores.json and annotated renderings of the synthetic interviews under
+    <output_dir>/eval/<timestamp>/. Exit code 0 when the run completes, 2 on setup errors.
+    """
+    from datetime import UTC, datetime
+    from time import perf_counter
+
+    from murmurs.config import Stage
+    from murmurs.errors import PipelineError
+    from murmurs.evaluate import format_type_line, names_recall, overall, score_set
+    from murmurs.stages.deid import deidentify, render_annotated
+
+    enforce_offline()
+    try:
+        job = resolve_config(config, [])
+    except ConfigError as exc:
+        _fail_config(exc)
+    try:
+        sets = load_dir(directory, [entity.name for entity in job.deid.entity_types])
+        check_weights(job, [Stage.DETECT_PHI])
+    except EvalSetError as exc:
+        _fail_setup(f"invalid evaluation set: {exc}")
+    except SetupError as exc:
+        _fail_setup(str(exc))
+
+    out_dir = job.data.output_dir / "eval" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    scores = []
+    ner = llm = None
+    try:
+        ner = registry.create_ner_detector(job)
+        llm = registry.create_llm_client(job)
+        for evalset in sets:
+            started = perf_counter()
+            layer, _ = deidentify(
+                evalset.transcript,
+                ner,
+                llm,
+                job.deid.entity_types,
+                evalset.set_id,
+                job.deid.llm_server.max_model_len,
+                job.deid.redaction_threshold,
+            )
+            scores.append(score_set(evalset, layer.spans, perf_counter() - started))
+            with atomic_writer(out_dir / f"{evalset.set_id}.annotated.txt") as f:
+                f.write(render_annotated(evalset.transcript, layer))
+    except SetupError as exc:
+        _fail_setup(str(exc))
+    except PipelineError as exc:
+        _fail_setup(f"evaluation failed ({exc.code})")
+    finally:
+        for backend in (llm, ner):
+            if backend is not None:
+                backend.close()
+
+    for score in scores:
+        typer.echo(f"{score.set_id}  {score.interview_type}  {score.seconds:.1f}s")
+        for name, type_score in score.by_type.items():
+            typer.echo(f"  {format_type_line(name, type_score)}")
+    total = overall(scores)
+    typer.echo("overall")
+    for name, type_score in total.items():
+        typer.echo(f"  {format_type_line(name, type_score)}")
+    found, labels = names_recall(total)
+    percent = f"{100 * found / labels:.1f}%" if labels else "-"
+    typer.echo(f"names recall: {found}/{labels} ({percent})")
+    payload = {
+        "sets": [score.model_dump(mode="json") for score in scores],
+        "overall": {name: score.model_dump(mode="json") for name, score in total.items()},
+        "names_recall": {"found": found, "labels": labels},
+    }
+    with atomic_writer(out_dir / "scores.json") as f:
+        f.write(json.dumps(payload, indent=2))
+    typer.echo(f"scores and annotated renderings: {out_dir}")
