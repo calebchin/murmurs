@@ -20,6 +20,16 @@ from murmurs.config import (
     resolve_config,
 )
 from murmurs.errors import SetupError
+from murmurs.evalimport import (
+    EvalImportError,
+    Pairing,
+    check_mapping,
+    collect_tags,
+    import_pairs,
+    load_mapping,
+    pair_files,
+    write_mapping,
+)
 from murmurs.evalset import EvalSetError, label_counts, load_dir
 from murmurs.logging import ProgressBar
 from murmurs.offline import WeightDownloadError, cached_revision, download_weight, enforce_offline
@@ -48,7 +58,10 @@ models_app = typer.Typer(
 )
 app.add_typer(models_app, name="models")
 
-eval_app = typer.Typer(help="Check and score the synthetic evaluation set.", no_args_is_help=True)
+eval_app = typer.Typer(
+    help="Check and score evaluation sets, and import human-deidentified transcripts as one.",
+    no_args_is_help=True,
+)
 app.add_typer(eval_app, name="eval")
 
 ConfigOption = Annotated[
@@ -413,3 +426,115 @@ def eval_run(
     with atomic_writer(out_dir / "scores.json") as f:
         f.write(json.dumps(payload, indent=2))
     typer.echo(f"scores and annotated renderings: {out_dir}")
+
+
+def _entity_type_names(config: Path | None) -> list[str]:
+    """The entity type names of a job config, or of the provisional set without one."""
+    if config is None:
+        return [entity.name for entity in PROVISIONAL_ENTITY_TYPES]
+    try:
+        return [entity.name for entity in resolve_config(config, []).deid.entity_types]
+    except ConfigError as exc:
+        _fail_config(exc)
+
+
+RawDirArgument = Annotated[
+    Path, typer.Argument(help="Folder of raw .txt transcripts (read only).", show_default=False)
+]
+DeidDirArgument = Annotated[
+    Path,
+    typer.Argument(
+        help="Folder of the human-deidentified copies, same relative paths (read only).",
+        show_default=False,
+    ),
+]
+
+
+@eval_app.command("tags")
+def eval_tags(
+    raw_dir: RawDirArgument,
+    deid_dir: DeidDirArgument,
+    mapping: Annotated[Path, typer.Argument(help="Tag mapping file to create or update (YAML).")],
+    config: OptionalConfigOption = None,
+) -> None:
+    """Find the redaction tags reviewers used and add them, blank, to a mapping file.
+
+    Fill in each tag's entity type (or IGNORE), then run `murmurs eval import`. Existing
+    entries are kept. Prints counts only; the tags are written only to the file.
+    """
+    types = _entity_type_names(config)
+    try:
+        pairing = _pair_files_checked(raw_dir, deid_dir, mapping)
+        existing = load_mapping(mapping) if mapping.exists() else {}
+        tags = collect_tags(pairing)
+        new = write_mapping(mapping, tags, existing, types)
+    except EvalImportError as exc:
+        _fail_setup(str(exc))
+    blank = sum(1 for key in set(tags) | set(existing) if not existing.get(key))
+    typer.echo(
+        f"pairs={len(pairing.pairs)}  tags={len(tags)}  occurrences={sum(tags.values())}"
+        f"  new={new}  still blank={blank}"
+    )
+    typer.echo(f"mapping: {mapping}")
+
+
+def _pair_files_checked(raw_dir: Path, deid_dir: Path, output: Path) -> Pairing:
+    """Pair the transcripts, refusing an output path inside either input folder."""
+    target = output.expanduser().absolute()
+    for folder in (raw_dir, deid_dir):
+        if target.is_relative_to(folder.expanduser().absolute()):
+            raise EvalImportError("outputs must be outside the input folders")
+    return pair_files(raw_dir, deid_dir)
+
+
+@eval_app.command("import")
+def eval_import(
+    raw_dir: RawDirArgument,
+    deid_dir: DeidDirArgument,
+    out_dir: Annotated[
+        Path, typer.Argument(help="New or empty folder for the evaluation interviews.")
+    ],
+    mapping: Annotated[
+        Path,
+        typer.Option(
+            "--tags", "-t", help="Tag mapping from `murmurs eval tags`.", show_default=False
+        ),
+    ],
+    config: OptionalConfigOption = None,
+) -> None:
+    """Turn raw and human-deidentified transcripts into an evaluation set.
+
+    Writes one *.md interview per pair plus import_report.json (counts only) to OUT_DIR,
+    ready for `murmurs eval check` and `murmurs eval run`. Prints counts and file names
+    only. Exit code 0 when the import completes, 2 if it cannot start.
+    """
+    types = _entity_type_names(config)
+    try:
+        pairing = _pair_files_checked(raw_dir, deid_dir, out_dir)
+        tag_map = load_mapping(mapping)
+        check_mapping(tag_map, types)
+        report = import_pairs(pairing, tag_map, out_dir, [raw_dir, deid_dir])
+    except EvalImportError as exc:
+        _fail_setup(str(exc))
+    totals: Counter[str] = Counter()
+    for item in report.files:
+        if not item.imported:
+            typer.echo(f"{item.file}  skipped: {item.reason}")
+            continue
+        totals.update(item.labels)
+        labels = ", ".join(f"{name}={n}" for name, n in item.labels.items())
+        typer.echo(
+            f"{item.file}  {item.interview_type}  turns={item.turns}"
+            f"  labels={sum(item.labels.values())} ({labels})  ignored={item.ignored_tags}"
+            f"  unaligned={item.unaligned_tags}  untagged_edits={item.untagged_edits}"
+            f"  deleted={item.deleted}  tags_without_text={item.tags_without_text}"
+        )
+    for name, files in (("raw", report.raw_only), ("deidentified", report.deid_only)):
+        if files:
+            typer.echo(f"only in the {name} folder ({len(files)}): {', '.join(files)}")
+    imported = sum(item.imported for item in report.files)
+    typer.echo(
+        f"imported {imported}/{len(report.files)} pairs, labels={sum(totals.values())}"
+        f" ({', '.join(f'{name}={n}' for name, n in sorted(totals.items()))})"
+    )
+    typer.echo(f"evaluation set and import_report.json: {out_dir}")

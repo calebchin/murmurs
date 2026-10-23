@@ -9,9 +9,11 @@ An interview is a Markdown file::
     PARTICIPANT: In {{LOCATION|Millbrook}}, with my aunt {{PERSON|Rosa}}.
 
 One line per turn; ``INTERVIEWER`` becomes ``SPEAKER_00`` and ``PARTICIPANT``
-``SPEAKER_01``. PHI is marked inline as ``{{TYPE|text}}`` or ``{{TYPE|text|note}}``. The
-parser builds a transcript (one segment per turn, synthetic word times) and labels whose
-offsets point into its canonical text (D9), so offsets are never counted by hand.
+``SPEAKER_01``. Turns may also start with a speaker label such as ``SPEAKER_02``, kept as
+is (``murmurs eval import`` writes these). PHI is marked inline as ``{{TYPE|text}}`` or
+``{{TYPE|text|note}}``. The parser builds a transcript (one segment per turn, synthetic
+word times) and labels whose offsets point into its canonical text (D9), so offsets are
+never counted by hand.
 
 Error messages name the file, line number or label ID, never transcript text.
 """
@@ -43,7 +45,7 @@ TURN_GAP_S = 1.0
 """Synthetic pause between turns."""
 
 _MARK = re.compile(r"\{\{([A-Z][A-Z_]*)\|([^{}|]+)(?:\|([^{}]*))?\}\}")
-_TURN = re.compile(r"^(INTERVIEWER|PARTICIPANT):\s*(.*)$")
+_TURN = re.compile(r"^(INTERVIEWER|PARTICIPANT|SPEAKER_\d{2,}):\s*(.*)$")
 
 
 class EvalSetError(ValueError):
@@ -106,12 +108,13 @@ def parse_interview(source: str, set_id: str) -> GroundTruthSet:
         match = _TURN.match(raw.strip())
         if match is None:
             raise EvalSetError(
-                f"{set_id} line {number}: must start with INTERVIEWER: or PARTICIPANT:"
+                f"{set_id} line {number}: must start with INTERVIEWER:, PARTICIPANT: or SPEAKER_NN:"
             )
         text, turn_labels = _parse_turn(match.group(2), f"{set_id} line {number}")
         if not text:
             raise EvalSetError(f"{set_id} line {number}: empty turn")
-        turns.append(_Turn(SPEAKERS[match.group(1)], text, turn_labels))
+        speaker = SPEAKERS.get(match.group(1), match.group(1))
+        turns.append(_Turn(speaker, text, turn_labels))
 
     segments: list[Segment] = []
     labels: list[GroundTruthLabel] = []
