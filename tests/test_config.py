@@ -114,6 +114,22 @@ def test_version_1_config_migrates_with_default_tolerance(tmp_path: Path) -> Non
     assert config.diarization.speaker_gap_tolerance_s == 0.5
 
 
+def test_version_5_config_migrates_with_default_turn_offset(tmp_path: Path) -> None:
+    raw = _example_raw()
+    raw["schema_version"] = 5
+    del raw["diarization"]["turn_offset_s"]
+    config = load_config(_write(tmp_path, raw))
+    assert config.schema_version == CURRENT_SCHEMA_VERSION
+    assert config.diarization.turn_offset_s == 0.1
+
+
+def test_negative_turn_offset_fails(tmp_path: Path) -> None:
+    raw = _example_raw()
+    raw["diarization"]["turn_offset_s"] = -0.1
+    err = _load_error(tmp_path, raw)
+    assert any(p.startswith("diarization.turn_offset_s:") for p in err.problems)
+
+
 def test_negative_gap_tolerance_fails(tmp_path: Path) -> None:
     raw = _example_raw()
     raw["diarization"]["speaker_gap_tolerance_s"] = -1

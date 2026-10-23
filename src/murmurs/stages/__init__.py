@@ -27,6 +27,7 @@ from murmurs.models import (
 from murmurs.stages import correction as _correction
 from murmurs.stages import deid as _deid
 from murmurs.stages.assign import assign_speakers as assign_words
+from murmurs.stages.assign import shift_turns
 from murmurs.stages.correction import correct_modes, prompt_hash
 from murmurs.stages.deid import deid_mode, deidentify, render_annotated, render_clean
 from murmurs.stages.deid import prompt_hash as deid_prompt_hash
@@ -144,7 +145,7 @@ def stage_config(stage: Stage, config: JobConfig) -> dict[str, Any]:
             return values
         case Stage.ASSIGN_SPEAKERS:
             values = config.diarization.model_dump(
-                mode="json", include={"speaker_gap_tolerance_s", "llm_correction"}
+                mode="json", include={"speaker_gap_tolerance_s", "turn_offset_s", "llm_correction"}
             )
             if config.diarization.llm_correction:
                 values["llm_model"] = config.deid.llm_model
@@ -209,13 +210,16 @@ def transcribe(ctx: StageContext) -> None:
 def assign_speakers(ctx: StageContext) -> None:
     """Label every word with a speaker and regroup words into speaker segments.
 
-    Rule-based assignment (P2-05) runs for every mode with the same speaker turns. With
+    Rule-based assignment (P2-05) runs for every mode with the same speaker turns, moved
+    ``diarization.turn_offset_s`` earlier (D20). With
     ``diarization.llm_correction`` on, the LLM then fixes label mistakes in one mode and
     the other follows by word time (P2-07, D24). Writes the final transcripts (used
     downstream), the rule-based ones (``<mode>.rule_based``) and a counts-only
     ``correction`` report, whether or not correction ran.
     """
-    turns = ctx.read(Stage.DIARIZE, Diarization).turns
+    turns = shift_turns(
+        ctx.read(Stage.DIARIZE, Diarization).turns, ctx.config.diarization.turn_offset_s
+    )
     tolerance = ctx.config.diarization.speaker_gap_tolerance_s
     rule_based = {
         mode: assign_words(

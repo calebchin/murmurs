@@ -1,6 +1,6 @@
 # Example murmurs job config. Every field is shown; omitted fields take the defaults
 # listed here. Print the full schema with: uv run murmurs config schema
-schema_version: 5
+schema_version: 6
 
 data:
   input_dir: /path/to/interview/audio
@@ -21,6 +21,7 @@ diarization:
   model: nvidia/Nemotron-3-Diarization
   num_speakers: null    # cap; speakers beyond the N with most talk time become UNKNOWN. null = keep all
   speaker_gap_tolerance_s: 0.5   # words in a gap up to this far from a turn take its speaker
+  turn_offset_s: 0.1    # move speaker turns this many seconds earlier to match word times (D20)
   llm_correction: true
 
 transcription:

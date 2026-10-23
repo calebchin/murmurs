@@ -68,6 +68,18 @@ class _Turns:
         return self.turns[i].speaker if gap <= gap_tolerance_s else UNKNOWN_SPEAKER
 
 
+def shift_turns(turns: Sequence[SpeakerTurn], offset_s: float) -> list[SpeakerTurn]:
+    """Move every turn ``offset_s`` seconds earlier, clamping times at 0 (D20)."""
+    if offset_s == 0:
+        return list(turns)
+    return [
+        turn.model_copy(
+            update={"start": max(0.0, turn.start - offset_s), "end": max(0.0, turn.end - offset_s)}
+        )
+        for turn in turns
+    ]
+
+
 def words_of(transcript: Transcript) -> list[Word]:
     """Every word of a transcript, in order."""
     return [word for segment in transcript.segments for word in segment.words]

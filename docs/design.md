@@ -101,7 +101,7 @@ The runner works in stage groups, finishing each group for every file before sta
 | 2 | Audio loading | Original audio file | In-memory 16 kHz mono waveform | Decode once with torchcodec (system ffmpeg) and resample in memory; the original file and format are untouched, and no converted file is written |
 | 3 | Diarization | Waveform | Speaker turns (JSON) | NVIDIA Nemotron-3-Diarization (via `transformers`) on the full recording; the model chunks long audio itself |
 | 4 | Transcription | Waveform | Verbatim and intended transcripts with word-level timestamps | CrisperWhisper 2.0 `transcribe_dual`, which handles long audio itself with no stitching needed |
-| 5 | Speaker assignment | Word timestamps + speaker turns | Full speaker-labeled transcript | Assign each word to the speaker turn it overlaps most; a word in a gap goes to the nearest turn within `speaker_gap_tolerance_s`, else `UNKNOWN`; optional LLM pass to fix diarization mistakes |
+| 5 | Speaker assignment | Word timestamps + speaker turns | Full speaker-labeled transcript | Move speaker turns `turn_offset_s` earlier, then assign each word to the speaker turn it overlaps most; a word in a gap goes to the nearest turn within `speaker_gap_tolerance_s`, else `UNKNOWN`; optional LLM pass to fix diarization mistakes |
 | 6 | PHI detection | Full transcript | Annotated transcript for review + clean version (PHI above a set threshold redacted) | NER model + LLM ensemble |
 | 7 | Human review | Annotated transcript | Clean, reviewed transcript | Review UI |
 
@@ -227,6 +227,7 @@ class DiarizationConfig(BaseModel):
     model: str = "nvidia/Nemotron-3-Diarization"
     num_speakers: int | None = Field(None, ge=1)  # cap: extra speakers become UNKNOWN; None = keep all
     speaker_gap_tolerance_s: float = Field(0.5, ge=0)  # max gap to nearest turn, else UNKNOWN
+    turn_offset_s: float = Field(0.1, ge=0)            # move turns earlier to match word times (D20)
     llm_correction: bool = True
 
 
@@ -269,7 +270,7 @@ class ComputeConfig(BaseModel):
 
 
 class JobConfig(BaseModel):
-    schema_version: int = 4              # 2 added diarization.speaker_gap_tolerance_s; 3 switched the diarization model, made num_speakers a cap and added .mp3; 4 added deid.llm_server
+    schema_version: int = 6              # 2 added diarization.speaker_gap_tolerance_s; 3 switched the diarization model, made num_speakers a cap and added .mp3; 4 added deid.llm_server; 5 added llm_server limits and transcription.draft_model; 6 added diarization.turn_offset_s
     data: DataConfig
     sample: SampleConfig = SampleConfig()
     stages: StagesConfig = StagesConfig()

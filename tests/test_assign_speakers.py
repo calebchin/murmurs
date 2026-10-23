@@ -26,7 +26,7 @@ from murmurs.models import (
 )
 from murmurs.runner import run_job
 from murmurs.stages import Backends
-from murmurs.stages.assign import assign_speakers
+from murmurs.stages.assign import assign_speakers, shift_turns
 from murmurs.store import ArtifactStore, transcript_to_text
 
 A, B = "SPEAKER_00", "SPEAKER_01"
@@ -183,6 +183,21 @@ def test_modes_with_shared_word_times_get_identical_speakers() -> None:
     assert all(by_time_v[key] == speaker for key, speaker in by_time_i.items())
 
 
+def test_shift_moves_turns_earlier_and_clamps_at_zero() -> None:
+    turns = [_turn(A, 0.05, 2.0), _turn(B, 2.0, 4.0)]
+    assert shift_turns(turns, 0.1) == [_turn(A, 0.0, 1.9), _turn(B, 1.9, 3.9)]
+    assert shift_turns(turns, 0.0) == turns
+
+
+def test_shift_gives_a_sentence_opening_word_to_the_next_speaker() -> None:
+    # B's turn starts 0.08 s after B's first word does, so without the shift the word
+    # overlaps A's turn more and stays with A (D20).
+    transcript = _transcript(("Done.", 1.0, 1.9), ("So", 2.0, 2.15), ("what", 2.15, 2.4))
+    turns = [_turn(A, 0.0, 2.08), _turn(B, 2.08, 4.0)]
+    assert _speakers(assign_speakers(transcript, turns, TOL)) == [A, A, B]
+    assert _speakers(assign_speakers(transcript, shift_turns(turns, 0.1), TOL)) == [A, B, B]
+
+
 def test_text_export_has_speaker_and_start_time() -> None:
     labeled = assign_speakers(
         _transcript(("hello", 61.25, 61.5), ("there", 62.0, 62.4)), [_turn(A, 61.0, 63.0)], TOL
@@ -245,7 +260,14 @@ def test_stage_labels_both_modes_and_writes_text(stub_job: StubJob) -> None:
         )
 
 
-def test_changing_tolerance_reruns_only_assignment(stub_job: StubJob) -> None:
+@pytest.mark.parametrize(
+    "change",
+    [{"speaker_gap_tolerance_s": 2.0}, {"turn_offset_s": 0.3}],
+    ids=["gap_tolerance", "turn_offset"],
+)
+def test_changing_assignment_settings_reruns_only_assignment(
+    stub_job: StubJob, change: dict[str, float]
+) -> None:
     config = _until_assign(load_config(stub_job()))
     first = run_job(config, "job", backends=_backends(), console=io.StringIO())
     file_id = first.done[0]
@@ -253,7 +275,7 @@ def test_changing_tolerance_reruns_only_assignment(stub_job: StubJob) -> None:
 
     backends = _backends()
     run_job(
-        _until_assign(config, speaker_gap_tolerance_s=2.0),
+        _until_assign(config, **change),
         "job",
         backends=backends,
         console=io.StringIO(),

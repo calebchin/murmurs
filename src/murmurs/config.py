@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 """Newest config schema version this code reads. Older versions are migrated on load."""
 
 
@@ -129,6 +129,10 @@ class DiarizationConfig(_Model):
     """Cap on speakers: those beyond the N with the most talk time become ``UNKNOWN``.
     ``None`` keeps every speaker the model finds."""
     speaker_gap_tolerance_s: float = Field(0.5, ge=0)
+    turn_offset_s: float = Field(0.1, ge=0)
+    """Seconds to move every speaker turn earlier before assigning words (D20): the
+    diarization model's speaker changes trail the transcriber's word times by about one
+    encoder frame. 0.1 s gave the fewest boundary errors on the example podcasts."""
     llm_correction: bool = True
 
 
@@ -327,6 +331,7 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     # 3 -> 4 added deid.llm_server, which has defaults.
     # 4 -> 5 added llm_server.max_output_tokens, max_concurrency and reasoning_effort,
     # and transcription.draft_model, which have defaults.
+    # 5 -> 6 added diarization.turn_offset_s, which has a default.
     return {**raw, "schema_version": CURRENT_SCHEMA_VERSION}
 
 
