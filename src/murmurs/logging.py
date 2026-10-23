@@ -12,19 +12,20 @@ should skip.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import sys
 import threading
 import time
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from pathlib import Path
 from types import TracebackType
-from typing import Literal, Protocol, TextIO
+from typing import Literal, Protocol, TextIO, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -316,6 +317,12 @@ class FileOutcome(StrEnum):
 class ProgressCallback(Protocol):
     """Progress hooks the runner calls. The CLI uses them now; the GUI will later."""
 
+    def on_group_start(
+        self, group: str, stages: Sequence[Stage], index: int, n_groups: int, n_files: int
+    ) -> None:
+        """Stage group ``index`` (1-based) of ``n_groups`` is starting for ``n_files`` files."""
+        ...
+
     def on_stage_start(self, file_id: str, stage: Stage) -> None:
         """A stage is starting for a file."""
         ...
@@ -334,6 +341,11 @@ class ProgressCallback(Protocol):
 class NullProgress:
     """Ignores all progress events."""
 
+    def on_group_start(
+        self, group: str, stages: Sequence[Stage], index: int, n_groups: int, n_files: int
+    ) -> None:
+        """Do nothing."""
+
     def on_stage_start(self, file_id: str, stage: Stage) -> None:
         """Do nothing."""
 
@@ -351,6 +363,11 @@ class LoggerProgress:
 
     def __init__(self, logger: RunLogger) -> None:
         self._logger = logger
+
+    def on_group_start(
+        self, group: str, stages: Sequence[Stage], index: int, n_groups: int, n_files: int
+    ) -> None:
+        """Do nothing: the runner logs ``group_start`` itself."""
 
     def on_stage_start(self, file_id: str, stage: Stage) -> None:
         """Log ``stage_start`` (debug level, so file only by default)."""
@@ -371,3 +388,136 @@ class LoggerProgress:
     def on_file_done(self, file_id: str, outcome: FileOutcome) -> None:
         """Log ``file_done`` with the outcome."""
         self._logger.info("file_done", file_id=file_id, status=outcome)
+
+
+class MultiProgress:
+    """Sends every progress event to each of several callbacks, in order."""
+
+    def __init__(self, callbacks: Sequence[ProgressCallback]) -> None:
+        self._callbacks = list(callbacks)
+
+    def on_group_start(
+        self, group: str, stages: Sequence[Stage], index: int, n_groups: int, n_files: int
+    ) -> None:
+        """Forward ``on_group_start``."""
+        for callback in self._callbacks:
+            callback.on_group_start(group, stages, index, n_groups, n_files)
+
+    def on_stage_start(self, file_id: str, stage: Stage) -> None:
+        """Forward ``on_stage_start``."""
+        for callback in self._callbacks:
+            callback.on_stage_start(file_id, stage)
+
+    def on_stage_end(
+        self, file_id: str, stage: Stage, status: StageStatus, duration_s: float
+    ) -> None:
+        """Forward ``on_stage_end``."""
+        for callback in self._callbacks:
+            callback.on_stage_end(file_id, stage, status, duration_s)
+
+    def on_file_done(self, file_id: str, outcome: FileOutcome) -> None:
+        """Forward ``on_file_done``."""
+        for callback in self._callbacks:
+            callback.on_file_done(file_id, outcome)
+
+
+class ProgressBar:
+    """A one-line progress bar for a terminal: files done in the current stage group.
+
+    Pass ``console`` to the runner as the log console, so log lines print above the bar
+    and the bar is redrawn below them. Shows only the group name, counts and times.
+    """
+
+    def __init__(self, stream: TextIO, width: int = 30) -> None:
+        self._stream = stream
+        self._width = width
+        self._lock = threading.RLock()
+        self._label = ""
+        self._last_stage: Stage | None = None
+        self._total = 0
+        self._done = 0
+        self._started = 0.0
+        self._shown = False
+        self.console = cast(TextIO, _BarConsole(self))
+
+    def on_group_start(
+        self, group: str, stages: Sequence[Stage], index: int, n_groups: int, n_files: int
+    ) -> None:
+        """Start a new bar for the group."""
+        with self._lock:
+            self._label = f"[{index}/{n_groups}] {group}"
+            self._last_stage = stages[-1] if stages else None
+            self._total, self._done = n_files, 0
+            self._started = time.monotonic()
+            self._draw()
+
+    def on_stage_start(self, file_id: str, stage: Stage) -> None:
+        """Do nothing: the bar counts whole files."""
+
+    def on_stage_end(
+        self, file_id: str, stage: Stage, status: StageStatus, duration_s: float
+    ) -> None:
+        """Count a file once it ends the group's last stage or fails."""
+        if status is StageStatus.FAILED or stage == self._last_stage:
+            with self._lock:
+                self._done = min(self._done + 1, self._total)
+                self._draw()
+
+    def on_file_done(self, file_id: str, outcome: FileOutcome) -> None:
+        """Do nothing: the bar counts files per group."""
+
+    def close(self) -> None:
+        """Remove the bar from the terminal."""
+        with self._lock:
+            self._clear()
+            self._stream.flush()
+
+    def line(self) -> str:
+        """The bar's current text."""
+        filled = self._width * self._done // self._total if self._total else self._width
+        bar = "█" * filled + "░" * (self._width - filled)
+        elapsed = time.monotonic() - self._started
+        text = f"{self._label} |{bar}| {self._done}/{self._total} files  {_clock(elapsed)}"
+        if 0 < self._done < self._total:
+            text += f"  ~{_clock(elapsed / self._done * (self._total - self._done))} left"
+        return text
+
+    def _clear(self) -> None:
+        if self._shown:
+            self._stream.write("\r\x1b[2K")
+            self._shown = False
+
+    def _draw(self) -> None:
+        if not self._label:
+            return
+        self._clear()
+        self._stream.write(self.line())
+        self._stream.flush()
+        self._shown = True
+
+    def _print(self, text: str) -> None:
+        with self._lock:
+            self._clear()
+            self._stream.write(text)
+            if text.endswith("\n"):
+                self._draw()
+
+
+class _BarConsole(io.TextIOBase):
+    """A console stream that prints above the progress bar."""
+
+    def __init__(self, bar: ProgressBar) -> None:
+        self._bar = bar
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        self._bar._print(text)
+        return len(text)
+
+
+def _clock(seconds: float) -> str:
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"

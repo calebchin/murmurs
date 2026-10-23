@@ -1,6 +1,7 @@
 """Command-line interface. A thin wrapper over the ``murmurs`` library."""
 
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
@@ -20,6 +21,7 @@ from murmurs.config import (
 )
 from murmurs.errors import SetupError
 from murmurs.evalset import EvalSetError, label_counts, load_dir
+from murmurs.logging import ProgressBar
 from murmurs.offline import WeightDownloadError, cached_revision, download_weight, enforce_offline
 from murmurs.runner import EXIT_SETUP_ERROR, check_weights, run_job
 from murmurs.store import StoreError, atomic_writer
@@ -161,10 +163,13 @@ def run(
         typer.echo(yaml.safe_dump(job.model_dump(mode="json"), sort_keys=False), nl=False)
         return
 
+    bar = ProgressBar(sys.stderr) if sys.stderr.isatty() else None
     try:
         summary = run_job(
             job,
             job_id or config.stem,
+            progress=bar,
+            console=None if bar is None else bar.console,
             debug_unsafe=debug_unsafe,
             install_crash_hook=True,
         )
@@ -173,6 +178,9 @@ def run(
     except KeyboardInterrupt:
         typer.echo("interrupted; rerun the same command to resume", err=True)
         raise typer.Exit(EXIT_INTERRUPTED) from None
+    finally:
+        if bar is not None:
+            bar.close()
     raise typer.Exit(summary.exit_code)
 
 

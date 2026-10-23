@@ -26,6 +26,7 @@ from murmurs.logging import (
     FileOutcome,
     LoggerProgress,
     MetricsRecorder,
+    MultiProgress,
     ProgressCallback,
     RunLogger,
     install_excepthook,
@@ -373,6 +374,8 @@ def run_job(
 ) -> JobSummary:
     """Run a job and return its summary.
 
+    Progress is always logged; ``progress``, if given, receives the same events too.
+
     Stage groups run in order, each for every file before the next group starts (D21);
     a file that fails a stage skips the rest of the job. Each backend is created just
     before the first stage that runs with it and closed after its last group.
@@ -403,7 +406,8 @@ def run_job(
     logger = RunLogger(log_dir=store.job_dir / "logs", console=console, debug_unsafe=debug_unsafe)
     if install_crash_hook:
         install_excepthook(logger)
-    progress = progress if progress is not None else LoggerProgress(logger)
+    logged = LoggerProgress(logger)
+    progress = logged if progress is None else MultiProgress([logged, progress])
 
     stages = stage_range(config)
     groups = stage_groups(stages)
@@ -444,6 +448,7 @@ def run_job(
             group_started = time.perf_counter()
             active = [run for run in runs if not run.failed]
             logger.info("group_start", group=name, n_files=len(active))
+            progress.on_group_start(name, group_stages, index + 1, len(groups), len(active))
             for run in active:
                 for stage in group_stages:
                     if not step.run(run, stage):
