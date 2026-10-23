@@ -40,7 +40,7 @@ from murmurs.backends.registry import BackendKind
 from murmurs.backends.stubs import StubLLMClient
 from murmurs.cli import app
 from murmurs.config import LLMServerConfig, load_config
-from murmurs.errors import BackendSetupError, PipelineError
+from murmurs.errors import LLM_OUTPUT_TRUNCATED, BackendSetupError, PipelineError
 
 
 class Answer(BaseModel):
@@ -106,13 +106,58 @@ def test_structured_request_returns_validated_object() -> None:
     assert [m["role"] for m in body["messages"]] == ["system", "user"]
     assert body["response_format"]["type"] == "json_schema"
     assert body["response_format"]["json_schema"]["schema"] == Answer.model_json_schema()
-    assert client.stats.requests == 1 and client.stats.prompt_tokens == 11
+    assert client.usage.requests == 1 and client.usage.prompt_tokens == 11
 
 
 def test_invalid_output_is_retried_then_succeeds() -> None:
     client = _mock_client(["not json", json.dumps({"speaker": "S"}), GOOD])
     assert client.generate("p", Answer).confidence == 0.9
-    assert client.stats.requests == 3 and client.stats.invalid_outputs == 2
+    assert client.usage.requests == 3 and client.usage.invalid_outputs == 2
+
+
+def test_request_carries_the_output_cap_and_reasoning_effort() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json=_completion(GOOD))
+
+    client = UnixSocketChatClient(
+        Path("/unused.sock"),
+        transport=httpx.MockTransport(handler),
+        max_output_tokens=1234,
+        reasoning_effort="low",
+    )
+    client.generate("p", Answer)
+    assert seen[0]["max_tokens"] == 1234 and seen[0]["reasoning_effort"] == "low"
+
+
+def test_truncated_response_is_not_retried() -> None:
+    truncated = httpx.Response(
+        200,
+        json={
+            "choices": [{"message": {"content": '{"speaker": "SPEAK'}, "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 4096},
+        },
+    )
+    client = _mock_client([truncated, GOOD])
+    with pytest.raises(PipelineError) as info:
+        client.generate("p", Answer)
+    assert info.value.code == LLM_OUTPUT_TRUNCATED and info.value.__cause__ is None
+    assert client.usage.requests == 1 and client.usage.truncated == 1
+    assert client.usage.completion_tokens == 4096
+
+
+def test_usage_counts_stay_exact_under_concurrent_requests() -> None:
+    import concurrent.futures
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_completion(GOOD))
+
+    client = UnixSocketChatClient(Path("/unused.sock"), transport=httpx.MockTransport(handler))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: client.generate("p", Answer), range(40)))
+    assert client.usage.requests == 40 and client.usage.prompt_tokens == 40 * 11
 
 
 def test_invalid_output_gives_typed_error_without_content() -> None:
@@ -123,7 +168,7 @@ def test_invalid_output_gives_typed_error_without_content() -> None:
     error = info.value
     assert error.code == LLM_INVALID_OUTPUT and error.detail == ""
     assert error.__cause__ is None and error.__context__ is None
-    assert SENTINEL not in str(error) and client.stats.requests == 3
+    assert SENTINEL not in str(error) and client.usage.requests == 3
 
 
 @pytest.mark.parametrize(
@@ -502,6 +547,6 @@ def test_real_server_answers_a_structured_request_offline(monkeypatch: pytest.Mo
         )
         assert answer.speaker in ("SPEAKER_00", "SPEAKER_01")
         assert 0.0 <= answer.confidence <= 1.0
-        assert llm.client.stats.requests >= 1
+        assert llm.client.usage.requests >= 1
         pid = llm.server.pid
     assert not os.path.exists(f"/proc/{pid}")

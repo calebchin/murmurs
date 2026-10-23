@@ -24,6 +24,7 @@ from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
 from murmurs.models import (
     DeidReport,
     DetectorSource,
+    LLMUsage,
     RedactionLayer,
     RedactionSpan,
     Segment,
@@ -33,11 +34,14 @@ from murmurs.models import (
 )
 from murmurs.runner import run_job
 from murmurs.stages.deid import (
+    DEID_LINE_TOKENS,
     Candidate,
     chunk_lines,
+    deid_mode,
     deidentify,
     lines_of,
     llm_candidates,
+    llm_lines,
     merge,
     ner_candidates,
     render_annotated,
@@ -77,6 +81,7 @@ class ScriptedLLM:
     """An ``LLMClient`` whose replies come from a function of the user prompt."""
 
     model_version = "scripted"
+    usage = LLMUsage()  # counts only; scripted LLMs report no tokens
 
     def __init__(self, respond: Callable[[str], Any]) -> None:
         self.respond = respond
@@ -146,6 +151,61 @@ def test_chunks_cover_every_line_once() -> None:
     assert chunks[1].before and chunks[1].after
 
 
+def test_deid_runs_on_verbatim_when_it_is_transcribed() -> None:
+    VERBATIM, INTENDED = TranscriptMode.VERBATIM, TranscriptMode.INTENDED
+    assert deid_mode((INTENDED, VERBATIM)) is VERBATIM
+    assert deid_mode((VERBATIM,)) is VERBATIM
+    assert deid_mode((INTENDED,)) is INTENDED
+
+
+def _monologue(n_words: int, last: str = "") -> Transcript:
+    words = " ".join(f"word{i}" for i in range(n_words))
+    return _transcript(
+        ("SPEAKER_00", "Tell me about it."),
+        ("SPEAKER_01", f"{words} {last}".strip()),
+        ("SPEAKER_00", "Thank you."),
+    )
+
+
+def test_long_segments_are_split_into_word_pieces_for_the_llm() -> None:
+    transcript = _monologue(2000)
+    text = canonical_text(transcript)
+    lines = llm_lines(transcript)
+    assert len(lines) > len(transcript.segments)
+    assert [ln.number for ln in lines] == list(range(len(lines)))
+    for line in lines:
+        assert text[line.start : line.start + len(line.text)] == line.text
+        assert line.text == line.text.strip() and line.text
+    long_pieces = [ln for ln in lines if ln.speaker == "SPEAKER_01"]
+    assert " ".join(ln.text for ln in long_pieces) == transcript.segments[1].text
+    assert all(len(ln.text) / 3.0 <= DEID_LINE_TOKENS + 10 for ln in long_pieces)
+    assert len(lines_of(transcript)) == len(transcript.segments)  # renderings are unchanged
+
+
+def test_entity_in_a_later_piece_gets_its_offsets_in_the_whole_text() -> None:
+    transcript = _monologue(2000, last="then Maria came")
+    spans, _ = llm_candidates(
+        transcript, ScriptedLLM(finder({"Maria": "PERSON"})), "f1", TYPES, 32768
+    )
+    text = canonical_text(transcript)
+    assert _texts(text, spans) == [("Maria", "PERSON")]
+    assert spans[0].start == text.index("Maria")
+
+
+def test_a_long_segment_is_never_left_unchecked(caplog: pytest.LogCaptureFixture) -> None:
+    transcript = _monologue(3000, last=f"then {SENTINEL} came")
+
+    def respond(prompt: str) -> Any:
+        if len(_own_lines(prompt)) > 1:
+            return PipelineError("LLM_OUTPUT_TRUNCATED")
+        return finder({SENTINEL: "PERSON"})(prompt)
+
+    spans, counts = llm_candidates(transcript, ScriptedLLM(respond), "f1", TYPES, 32768)
+    assert counts.failed_chunks == 0 and counts.splits > 0
+    assert _texts(canonical_text(transcript), spans) == [(SENTINEL, "PERSON")]
+    assert SENTINEL not in caplog.text
+
+
 # --- LLM detection ---------------------------------------------------------------------------
 
 
@@ -207,7 +267,8 @@ def test_invalid_chunk_output_is_skipped_and_failed_requests_fail() -> None:
     _, counts = llm_candidates(
         INTERVIEW, ScriptedLLM(lambda p: PipelineError(LLM_INVALID_OUTPUT)), "f1", TYPES, 32768
     )
-    assert counts.failed_chunks == 1
+    # Invalid output splits the chunk down to single lines, each of which fails.
+    assert counts.splits == 3 and counts.failed_chunks == 4
     with pytest.raises(PipelineError, match="LLM_REQUEST_FAILED"):
         llm_candidates(
             INTERVIEW,
@@ -381,17 +442,17 @@ def test_stage_writes_layer_renderings_and_report(stub_job: StubJob, correction:
             p.name for p in store.file_dir(file_id).iterdir() if p.name.startswith("detect_phi")
         }
         assert names == {
-            "detect_phi.intended.json",
-            "detect_phi.intended.annotated.txt",
-            "detect_phi.intended.clean.txt",
+            "detect_phi.verbatim.json",
+            "detect_phi.verbatim.annotated.txt",
+            "detect_phi.verbatim.clean.txt",
             "detect_phi.report.json",
         }
-        layer = store.read(file_id, Stage.DETECT_PHI, RedactionLayer, "intended")
-        assert layer.transcript.mode is TranscriptMode.INTENDED and layer.spans
-        clean = store.artifact_path(file_id, Stage.DETECT_PHI, "intended.clean", ".txt").read_text()
+        layer = store.read(file_id, Stage.DETECT_PHI, RedactionLayer, "verbatim")
+        assert layer.transcript.mode is TranscriptMode.VERBATIM and layer.spans
+        clean = store.artifact_path(file_id, Stage.DETECT_PHI, "verbatim.clean", ".txt").read_text()
         assert SENTINEL not in clean and "[PERSON_1]" in clean and "[LOCATION_1]" in clean
         annotated = store.artifact_path(
-            file_id, Stage.DETECT_PHI, "intended.annotated", ".txt"
+            file_id, Stage.DETECT_PHI, "verbatim.annotated", ".txt"
         ).read_text()
         assert f"{{{{PERSON_1|{SENTINEL}}}}}" in annotated
         report = store.read(file_id, Stage.DETECT_PHI, DeidReport, "report")
@@ -417,3 +478,107 @@ def test_editing_the_deid_prompt_reruns_only_detect_phi(
     after = stage_hashes(config)
     assert before[Stage.DETECT_PHI] != after[Stage.DETECT_PHI]
     assert before[Stage.ASSIGN_SPEAKERS] == after[Stage.ASSIGN_SPEAKERS]
+
+
+# --- concurrency, splitting and reasoning effort (LLM speed-ups) -------------------------------
+
+
+def _many_lines(n: int) -> Transcript:
+    return _transcript(
+        *[
+            ("SPEAKER_01" if i % 2 else "SPEAKER_00", f"Maria went to Millbrook again {i}")
+            for i in range(n)
+        ]
+    )
+
+
+def test_deid_chunks_are_small() -> None:
+    long = _transcript(*[("SPEAKER_00", "word " * 200) for _ in range(60)])
+    chunks = chunk_lines(lines_of(long), max_model_len=32768)
+    assert len(chunks) > 20  # about 1,000 tokens each, not max_model_len / 4
+
+
+def test_truncated_deid_chunks_are_split_and_entities_still_found() -> None:
+    transcript = _many_lines(16)
+
+    def respond(prompt: str) -> Any:
+        if len(_own_lines(prompt)) > 2:
+            return PipelineError("LLM_OUTPUT_TRUNCATED")
+        return finder({"Maria": "PERSON", "Millbrook": "LOCATION"})(prompt)
+
+    spans, counts = llm_candidates(
+        transcript, ScriptedLLM(respond), "f1", TYPES, 32768, max_concurrency=4
+    )
+    text = canonical_text(transcript)
+    assert counts.splits > 0 and counts.failed_chunks == 0
+    assert _texts(text, spans).count(("Maria", "PERSON")) == 16
+
+
+def test_deid_result_is_the_same_with_and_without_concurrency() -> None:
+    transcript = _many_lines(40)
+    respond = finder({"Maria": "PERSON", "Millbrook": "LOCATION"})
+    one, _ = deidentify(
+        transcript, StubNERDetector({}), ScriptedLLM(respond), TYPES, "f1", 2048, 0.5
+    )
+    many, report = deidentify(
+        transcript,
+        StubNERDetector({}),
+        ScriptedLLM(respond),
+        TYPES,
+        "f1",
+        2048,
+        0.5,
+        max_concurrency=8,
+    )
+    assert one == many and report.schema_version == 2 and report.n_chunks > 1
+
+
+def test_reasoning_effort_reruns_the_llm_stages(stub_job: StubJob) -> None:
+    from murmurs.runner import stage_hashes
+
+    config, _ = _job(stub_job, "hello there", correction=True)
+    low = config.model_copy(
+        update={
+            "deid": config.deid.model_copy(
+                update={
+                    "llm_server": config.deid.llm_server.model_copy(
+                        update={"reasoning_effort": "low"}
+                    )
+                }
+            )
+        }
+    )
+    before, after = stage_hashes(config), stage_hashes(low)
+    assert before[Stage.ASSIGN_SPEAKERS] != after[Stage.ASSIGN_SPEAKERS]
+    assert before[Stage.DETECT_PHI] != after[Stage.DETECT_PHI]
+    assert before[Stage.TRANSCRIBE] == after[Stage.TRANSCRIBE]
+    faster = config.model_copy(
+        update={
+            "deid": config.deid.model_copy(
+                update={
+                    "llm_server": config.deid.llm_server.model_copy(update={"max_concurrency": 2})
+                }
+            )
+        }
+    )
+    assert stage_hashes(faster) == before  # speed settings never rerun stages
+
+
+def test_chunk_sizes_rerun_the_llm_stages(
+    stub_job: StubJob, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from murmurs.runner import stage_hashes
+    from murmurs.stages import correction, deid
+
+    config, _ = _job(stub_job, "hello there", correction=True)
+    before = stage_hashes(config)
+    monkeypatch.setattr(correction, "CORRECTION_CHUNK_TOKENS", 512.0)
+    after_correction = stage_hashes(config)
+    assert after_correction[Stage.ASSIGN_SPEAKERS] != before[Stage.ASSIGN_SPEAKERS]
+    assert after_correction[Stage.TRANSCRIBE] == before[Stage.TRANSCRIBE]
+    monkeypatch.setattr(deid, "DEID_CHUNK_TOKENS", 500.0)
+    after_deid = stage_hashes(config)
+    assert after_deid[Stage.DETECT_PHI] != after_correction[Stage.DETECT_PHI]
+    assert after_deid[Stage.ASSIGN_SPEAKERS] == after_correction[Stage.ASSIGN_SPEAKERS]
+    monkeypatch.setattr(deid, "DEID_LINE_TOKENS", 100.0)
+    assert stage_hashes(config)[Stage.DETECT_PHI] != after_deid[Stage.DETECT_PHI]

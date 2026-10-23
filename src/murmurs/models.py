@@ -195,21 +195,52 @@ class Transcript(_Frozen):
     segments: list[Segment]
 
 
+class LLMUsage(_Model):
+    """LLM request counts, tokens and time: never prompt or response content."""
+
+    requests: int = Field(0, ge=0)
+    prompt_tokens: int = Field(0, ge=0)
+    completion_tokens: int = Field(0, ge=0)
+    """Generated tokens, reasoning included."""
+    truncated: int = Field(0, ge=0)
+    """Responses cut off at the output-token cap."""
+    invalid_outputs: int = Field(0, ge=0)
+    """Responses that did not validate against the requested model (then retried)."""
+    seconds: float = Field(0.0, ge=0)
+    """Summed request time; with concurrent requests this exceeds wall time."""
+
+    def minus(self, earlier: LLMUsage) -> LLMUsage:
+        """The usage between ``earlier`` (a snapshot) and this one."""
+        return LLMUsage(
+            requests=self.requests - earlier.requests,
+            prompt_tokens=self.prompt_tokens - earlier.prompt_tokens,
+            completion_tokens=self.completion_tokens - earlier.completion_tokens,
+            truncated=self.truncated - earlier.truncated,
+            invalid_outputs=self.invalid_outputs - earlier.invalid_outputs,
+            seconds=round(max(0.0, self.seconds - earlier.seconds), 3),
+        )
+
+
 class SpeakerCorrection(_Model):
     """Stage 5 report on the LLM speaker-correction pass (P2-07): counts only, no text.
 
     Written whether or not correction ran (``enabled``), so toggling it never leaves a
-    stale report.
+    stale report. (Schema 2 added ``chunk_splits`` and ``llm``.)
     """
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     file_id: str
     enabled: bool
     source_mode: TranscriptMode | None = None
     """The mode the LLM corrected; the other mode was mapped by word time (D24)."""
     n_chunks: int = Field(0, ge=0)
+    chunk_splits: int = Field(0, ge=0)
+    """Times a chunk was split in half after a truncated or invalid response."""
     failed_chunks: int = Field(0, ge=0)
-    """Chunks whose LLM output stayed invalid after retries; they keep rule-based labels."""
+    """Chunks (after splitting) whose LLM output stayed unusable; they keep rule-based
+    labels."""
+    llm: LLMUsage = Field(default_factory=LLMUsage)
+    """LLM usage for this file."""
     proposed: int = Field(0, ge=0)
     """Label changes the LLM proposed."""
     applied: int = Field(0, ge=0)
@@ -220,14 +251,21 @@ class SpeakerCorrection(_Model):
 
 
 class DeidReport(_Model):
-    """Stage 6 report on PHI detection (P3-03): counts only, never text."""
+    """Stage 6 report on PHI detection (P3-03): counts only, never text.
 
-    schema_version: Literal[1] = 1
+    (Schema 2 added ``chunk_splits`` and ``llm``.)
+    """
+
+    schema_version: Literal[2] = 2
     file_id: str
     mode: TranscriptMode
     n_chunks: int = Field(0, ge=0)
+    chunk_splits: int = Field(0, ge=0)
+    """Times a chunk was split in half after a truncated or invalid response."""
     failed_chunks: int = Field(0, ge=0)
-    """Chunks whose LLM output stayed invalid after retries."""
+    """Chunks (after splitting) whose LLM output stayed unusable."""
+    llm: LLMUsage = Field(default_factory=LLMUsage)
+    """LLM usage for this file."""
     llm_proposed: int = Field(0, ge=0)
     llm_rejected: dict[str, int] = {}
     """Rejected LLM entities by reason (e.g. ``"not_found"``)."""

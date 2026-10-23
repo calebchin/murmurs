@@ -34,6 +34,7 @@ from murmurs.manifest import finish_manifest, sample_job_id, select_sample, star
 from murmurs.models import AudioInfo, ErrorInfo, FileStatus, StageStatus, TranscriptMode
 from murmurs.offline import check_cached, check_prepared, enforce_offline
 from murmurs.stages import (
+    DEID_REPORT,
     DEPENDS,
     MISSING_UPSTREAM,
     RULE_BASED,
@@ -45,6 +46,7 @@ from murmurs.stages import (
     stage_groups,
     stage_variants,
 )
+from murmurs.stages.deid import deid_mode
 from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
 
 EXIT_OK = 0
@@ -523,6 +525,11 @@ def export_transcripts(
     For each mode: ``<mode>.txt`` (final, LLM-corrected if correction ran),
     ``<mode>.rule_based.txt`` and ``<mode>.words.tsv`` (final). Only for files whose
     speaker assignment is done.
+
+    Once PHI detection is done, also, for the deidentified mode: the original transcript
+    ``<mode>.json`` (redaction offsets point into its canonical text, D9), the redaction
+    layer ``<mode>.redactions.json``, ``<mode>.annotated.txt``, ``<mode>.clean.txt`` and
+    the counts-only ``deid_report.json``. The original transcript is never changed.
     """
     if status.stages.get(Stage.ASSIGN_SPEAKERS) is not StageStatus.DONE:
         return
@@ -537,6 +544,20 @@ def export_transcripts(
             source = store.artifact_path(file.file_id, Stage.ASSIGN_SPEAKERS, variant, suffix)
             if source.is_file():
                 store.write_export(folder, name, source.read_text(encoding="utf-8"))
+    if status.stages.get(Stage.DETECT_PHI) is not StageStatus.DONE:
+        return
+    deid = deid_mode(modes).value
+    deid_sources = {
+        f"{deid}.json": (Stage.ASSIGN_SPEAKERS, deid, ".json"),
+        f"{deid}.redactions.json": (Stage.DETECT_PHI, deid, ".json"),
+        f"{deid}.annotated.txt": (Stage.DETECT_PHI, f"{deid}.annotated", ".txt"),
+        f"{deid}.clean.txt": (Stage.DETECT_PHI, f"{deid}.clean", ".txt"),
+        "deid_report.json": (Stage.DETECT_PHI, DEID_REPORT, ".json"),
+    }
+    for name, (stage, variant, suffix) in deid_sources.items():
+        source = store.artifact_path(file.file_id, stage, variant, suffix)
+        if source.is_file():
+            store.write_export(folder, name, source.read_text(encoding="utf-8"))
 
 
 def _start_file(

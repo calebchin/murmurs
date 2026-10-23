@@ -17,7 +17,14 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel
 
-from murmurs.models import Diarization, RedactionSpan, Transcript, TranscriptMode, ValidationResult
+from murmurs.models import (
+    Diarization,
+    LLMUsage,
+    RedactionSpan,
+    Transcript,
+    TranscriptMode,
+    ValidationResult,
+)
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -103,9 +110,20 @@ class NERDetector(Protocol):
 
 @runtime_checkable
 class LLMClient(Protocol):
-    """A locally run LLM that returns structured output."""
+    """A locally run LLM that returns structured output.
+
+    ``generate`` may be called from several threads at once (callers send chunks
+    concurrently). It raises ``PipelineError`` with ``LLM_INVALID_OUTPUT`` when output
+    stays invalid, ``LLM_OUTPUT_TRUNCATED`` when a response hits the output cap, and
+    another code when the request itself fails.
+    """
 
     model_version: str
+
+    @property
+    def usage(self) -> LLMUsage:
+        """Running totals of requests, tokens and time (counts only)."""
+        ...
 
     def generate(
         self, prompt: str, response_model: type[M], file_id: str, system: str | None = None

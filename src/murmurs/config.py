@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import (
@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 """Newest config schema version this code reads. Older versions are migrated on load."""
 
 
@@ -140,6 +140,10 @@ class TranscriptionConfig(_Model):
     language: str = "en"
     modes: list[str] = ["verbatim", "intended"]
     word_timestamps: bool = True
+    draft_model: str | None = None
+    """A smaller CrisperWhisper 2.0 model (e.g. ``nyralabs/CrisperWhisper2.0_turbo``) for
+    speculative decoding: each mode is decoded in its own pass, about 1.2 times faster
+    than without for one mode, changing about 0.1% of words. ``null`` = off."""
 
 
 class EntityType(_Model):
@@ -237,10 +241,10 @@ The data owners decide the final set. NER labels not mapped to any type are igno
 
 
 class LLMServerConfig(_Model):
-    """Settings for the local vLLM server that runs the LLM (D22).
+    """Settings for the local vLLM server that runs the LLM, and for requests to it (D22).
 
-    They affect speed and memory, not results, so they are not part of any stage's
-    config hash.
+    Only ``reasoning_effort`` changes results, so it is the only one in the LLM stages'
+    config hashes; the rest affect speed, memory and robustness.
     """
 
     gpu_memory_utilization: float = Field(0.85, gt=0, le=1)
@@ -249,6 +253,15 @@ class LLMServerConfig(_Model):
     """Longest prompt plus response, in tokens."""
     startup_timeout_s: float = Field(900, gt=0)
     """How long to wait for the server to become ready before the job stops."""
+    max_output_tokens: int = Field(8192, ge=256)
+    """Cap on each response, reasoning included. Normal responses take 2,000 to 5,000
+    tokens, so hitting the cap means a runaway: it is not retried as is, its chunk is
+    split in half and the halves are tried instead."""
+    max_concurrency: int = Field(64, ge=1, le=64)
+    """Requests sent to the server at the same time; it batches them on the GPU, so more
+    requests in flight means more tokens per second overall."""
+    reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    """GPT-OSS reasoning effort for every request. Lower is faster but may lower recall."""
 
 
 class DeidConfig(_Model):
@@ -312,6 +325,8 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     # .mp3 to the default audio_extensions; the fields are unchanged, so there is
     # nothing to rewrite.
     # 3 -> 4 added deid.llm_server, which has defaults.
+    # 4 -> 5 added llm_server.max_output_tokens, max_concurrency and reasoning_effort,
+    # and transcription.draft_model, which have defaults.
     return {**raw, "schema_version": CURRENT_SCHEMA_VERSION}
 
 

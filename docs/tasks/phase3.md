@@ -66,6 +66,61 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 
 ---
 
+## P3-05: LLM throughput
+
+**Goal:** the LLM passes (speaker correction and deidentification) finish in a few minutes per hour of audio, without runaway responses.
+
+**Why:** in the first end-to-end run (53-minute podcast), deidentification took 626 s of the job's 1,003 s. Requests ran one at a time at about 200 generated tokens/s; responses had no length cap, two ran to the context limit, and a cut-off response was retried as is, three times.
+
+**Scope**
+- New `deid.llm_server` settings (config schema 5): `max_output_tokens` (8192), `max_concurrency` (64) and `reasoning_effort` (`low`/`medium`/`high`, default `medium`). Of these, only `reasoning_effort` is part of the LLM stages' config hashes; the chunk sizes below are too, so changing them reruns the stage.
+- The client caps every response at `max_output_tokens` and sends `reasoning_effort`. A response cut off at the cap raises `LLM_OUTPUT_TRUNCATED` at once, without retrying.
+- Both LLM passes send a file's chunks concurrently (up to `max_concurrency`) and process results in chunk order. A truncated or invalid chunk is split in half and the halves are tried; a one-line chunk that still fails is counted as failed.
+- Both passes use small chunks: speaker correction chunks own about 1,024 transcript tokens and deidentification chunks about 1,000 (both were a quarter of the context window).
+- `LLMClient` exposes running `usage` (requests, tokens, truncations, invalid outputs, time); the correction and deid reports record per-file usage and chunk splits (both reports go to schema 2).
+
+**Out of scope:** batching requests across files (needs runner changes), multi-process transcription.
+
+**Acceptance criteria**
+- Results are in chunk order and identical with and without concurrency.
+- A truncated chunk is split until its parts succeed; every line is answered exactly once; a failed request stops the file.
+- The client never retries a truncated response, and its usage counts stay exact under concurrent use.
+- Changing `reasoning_effort` or a chunk size reruns the LLM stages; changing `max_concurrency` or `max_output_tokens` does not.
+- GPU: the podcast job and `murmurs eval run` are rerun to measure the speed-up, comparing `reasoning_effort` low and medium on the evaluation set.
+
+**Measured** (RTX PRO 6000, 96 GB; 68-minute podcast, `reasoning_effort: medium`)
+- Output tokens per second rise with concurrent requests: 196 (1), 619 (8), 930 (32), 1,166 (64). The model reasons for 2,000 to 5,000 tokens per request whatever the chunk size.
+- With 4,096-token caps and quarter-context chunks, 19 of 45 correction requests were cut off and split; the pass took 398 s, slower than before P3-05 (356 s). Hence the higher cap and small chunks.
+- Speaker correction at concurrency 64: 150 s with quarter-context chunks, 125 s with 2,048-token chunks, 95 s with 1,024-token chunks.
+- Deidentification at concurrency 64 with 2,000-token chunks: 137 s (712 s per audio hour before P3-05 on the same podcasts, 121 s now).
+- With these defaults, the podcast job (3 files, 3.5 hours of audio) took 1,000 s: audio 363 s, speaker correction 345 s, deidentification 264 s, or 98 s and 75 s per audio hour for the two LLM passes (about 250 s and 712 s before P3-05).
+- Evaluation set with these defaults: names 52/52 and about 2 times faster than 2,000-token chunks at concurrency 8. Each run leaves 1 or 2 different labels uncovered, with 1,000- and 2,000-token chunks alike: vLLM output varies with how requests are batched, even at temperature 0.
+- Speaker correction with 1,024-token chunks relabels 4.6% of a file's words against 3.5% with quarter-context chunks; the two runs' final labels differ on 3.0% of words. Which is more accurate needs speaker ground truth.
+- Evaluation set: `low` effort is about 4.5 times faster than `medium` but missed a name (51/52) and left 7 labels uncovered (medium: 52/52, none uncovered), so `medium` stays the default.
+- The evaluation set now tags every mention of each name, place and organization, not only the first (32 labels added; pet names are not tagged). Before, a detector that found only first mentions scored 100% on names.
+
+---
+
+## P3-06: Run configuration for a 24-hour budget
+
+**Goal:** about 600 hours of audio through transcription and PHI detection in about 24 hours of compute on one RTX PRO 6000.
+
+**Decisions (Oct 23, 2026):** transcribe verbatim only, with speculative decoding; skip LLM speaker correction for now (`diarization.llm_correction: false`; diarization and rule-based labels stay); deidentify the verbatim transcript (D9 changed); export the original transcript with the deidentification outputs.
+
+**Scope**
+- `transcription.draft_model` (config schema 5, default `null`): a smaller CrisperWhisper 2.0 model for speculative decoding. With it, each mode is decoded in its own speculative pass. `murmurs models download` downloads and converts it; it is part of the transcription config hash only when set.
+- PHI detection runs on verbatim whenever it is transcribed.
+- Lines the LLM sees are capped at about 250 tokens: longer speaker segments are split between words (`llm_lines`), so a chunk that keeps failing can always be split until every part is answered. Renderings still show whole segments.
+- `transcripts/<file>/` also gets, once detection is done: the original transcript (`verbatim.json`, which the redaction offsets point into), the redaction layer (`verbatim.redactions.json`, with each span's detectors and confidence), the annotated and clean renderings, and `deid_report.json`.
+
+**Measured** (same 3 podcasts, 3.5 hours of audio, `draft_model: nyralabs/CrisperWhisper2.0_turbo`)
+- Speculative decoding: on a 20-minute slice, verbatim took 48.9 s per audio hour against 60.0 s without it and 72.7 s for the dual pass. It is not bit-identical to the large model alone: 5 of 4,603 words differ (0.11%), and each mode is deterministic on its own.
+- Job: 539 s in all (was 1,000 s with correction and both modes): audio group 255 s, speaker assignment 0.3 s, PHI detection 270 s. Per file, transcription takes about 49 s and detection about 63 s per audio hour, plus about 2 minutes of model loading per job. Projected for 600 hours: about 20 hours.
+- Detection on the podcasts: no truncated responses, no failed chunks.
+- Evaluation set: names 52/52 in every run. Uncovered labels vary from run to run (0 to 6): now and then a valid response for one chunk lists fewer entities, and the labels in its lines are missed.
+
+---
+
 ## Deferred after the MVP
 
 - Confidence beyond detector agreement (design open question).

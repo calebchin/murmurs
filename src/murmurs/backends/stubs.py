@@ -8,6 +8,7 @@ raise ``KeyboardInterrupt`` once for chosen file IDs.
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,7 @@ from murmurs.models import (
     Diarization,
     ErrorInfo,
     IngestErrorCode,
+    LLMUsage,
     RedactionSpan,
     Segment,
     SpeakerTurn,
@@ -188,6 +190,8 @@ class StubLLMClient(_Stub):
     def __init__(self, response: Mapping[str, Any] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.response = dict(response or {})
+        self.usage = LLMUsage()
+        self._lock = threading.Lock()
 
     def generate(
         self, prompt: str, response_model: type[M], file_id: str, system: str | None = None
@@ -198,6 +202,8 @@ class StubLLMClient(_Stub):
         ``PipelineError(LLM_INVALID_OUTPUT)``, never the validation error itself.
         """
         self._record(file_id)
+        with self._lock:
+            self.usage = self.usage.model_copy(update={"requests": self.usage.requests + 1})
         try:
             return response_model.model_validate(self.response)
         except ValidationError:

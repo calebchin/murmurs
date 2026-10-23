@@ -9,6 +9,9 @@ _CODE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 LLM_INVALID_OUTPUT = "LLM_INVALID_OUTPUT"
 """Error code an ``LLMClient`` raises when its output stays invalid after retries."""
+LLM_OUTPUT_TRUNCATED = "LLM_OUTPUT_TRUNCATED"
+"""Error code an ``LLMClient`` raises when a response hit its output-token cap. It is not
+retried as is; callers split the request into smaller ones instead."""
 
 
 class PipelineError(Exception):

@@ -59,6 +59,12 @@ def test_minimal_config_takes_defaults(tmp_path: Path) -> None:
     assert config.stages.start is Stage.INGEST
     assert config.stages.end is Stage.DETECT_PHI
     assert config.diarization.speaker_gap_tolerance_s == 0.5
+    server = config.deid.llm_server
+    assert (server.max_output_tokens, server.max_concurrency, server.reasoning_effort) == (
+        8192,
+        64,
+        "medium",
+    )
 
 
 def test_missing_input_dir_names_the_field(tmp_path: Path) -> None:

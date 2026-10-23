@@ -16,7 +16,7 @@ from murmurs.cli import app
 from murmurs.config import PROVISIONAL_ENTITY_TYPES
 from murmurs.evalset import load_dir
 from murmurs.evaluate import names_recall, overall, score_set
-from murmurs.models import DetectorSource, RedactionSpan
+from murmurs.models import DetectorSource, LLMUsage, RedactionSpan
 
 FIXTURES = Path(__file__).parent / "fixtures" / "eval"
 TYPES = [e.name for e in PROVISIONAL_ENTITY_TYPES]
@@ -78,6 +78,7 @@ class _FindAll:
     """A scripted LLM that reports every label of the fixture set (by surface)."""
 
     model_version = "scripted"
+    usage = LLMUsage()  # counts only; scripted LLMs report no tokens
 
     def __init__(self, surfaces: dict[str, str]) -> None:
         self.surfaces = surfaces

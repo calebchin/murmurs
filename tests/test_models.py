@@ -173,7 +173,11 @@ def test_examples_cover_every_top_level_artifact() -> None:
 
 @pytest.mark.parametrize("model", TOP_LEVEL_ARTIFACTS, ids=lambda m: m.__name__)
 def test_top_level_artifacts_carry_schema_version(model: type[BaseModel]) -> None:
-    expected = 2 if model in (FileStatus, ValidationResult, AudioInfo) else 1
+    expected = (
+        2
+        if model in (FileStatus, ValidationResult, AudioInfo, SpeakerCorrection, DeidReport)
+        else 1
+    )
     assert model.model_fields["schema_version"].default == expected
 
 

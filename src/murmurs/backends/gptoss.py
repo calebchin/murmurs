@@ -20,10 +20,10 @@ import socket
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import weakref
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,7 +31,13 @@ from pydantic import ValidationError
 
 from murmurs.backends import M
 from murmurs.config import JobConfig, LLMServerConfig
-from murmurs.errors import LLM_INVALID_OUTPUT, BackendSetupError, PipelineError
+from murmurs.errors import (
+    LLM_INVALID_OUTPUT,
+    LLM_OUTPUT_TRUNCATED,
+    BackendSetupError,
+    PipelineError,
+)
+from murmurs.models import LLMUsage
 from murmurs.offline import OFFLINE_ENV, PreparedModel, WeightSpec, cached_snapshot
 
 MODEL_ID = "openai/gpt-oss-120b"
@@ -375,22 +381,12 @@ def _health_ok(socket_path: Path) -> bool:
 # --- the client -------------------------------------------------------------------------------
 
 
-@dataclass
-class LLMStats:
-    """Counts and durations only; never prompt or response content."""
-
-    requests: int = 0
-    invalid_outputs: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    seconds: float = 0.0
-
-
 class UnixSocketChatClient:
     """OpenAI-style chat completions over a Unix domain socket, and nothing else.
 
     It accepts only an absolute path to an existing Unix socket, never a URL, host or
-    port, so it cannot be pointed at a TCP address (hard rule 4).
+    port, so it cannot be pointed at a TCP address (hard rule 4). Safe to use from
+    several threads at once.
     """
 
     def __init__(
@@ -400,6 +396,8 @@ class UnixSocketChatClient:
         max_attempts: int = 3,
         timeout_s: float = 600.0,
         transport: Any = None,
+        max_output_tokens: int = 4096,
+        reasoning_effort: str = "medium",
     ) -> None:
         if not isinstance(socket_path, Path):
             raise TypeError("socket_path must be a pathlib.Path to a Unix socket")
@@ -416,7 +414,10 @@ class UnixSocketChatClient:
 
         self.model = model
         self.max_attempts = max_attempts
-        self.stats = LLMStats()
+        self.max_output_tokens = max_output_tokens
+        self.reasoning_effort = reasoning_effort
+        self.usage = LLMUsage()
+        self._lock = threading.Lock()
         self._http = httpx.Client(
             transport=transport or httpx.HTTPTransport(uds=str(socket_path)),
             base_url="http://localhost",  # placeholder host; the transport is the socket
@@ -444,8 +445,10 @@ class UnixSocketChatClient:
         """Return the response validated as ``response_model``.
 
         The server constrains output to the model's JSON schema; output that still
-        fails validation is retried up to ``max_attempts`` times. Failures raise
-        ``PipelineError`` with a code only, never request or response content.
+        fails validation is retried up to ``max_attempts`` times. A response cut off at
+        ``max_output_tokens`` raises ``LLM_OUTPUT_TRUNCATED`` at once: the same request
+        would run to the cap again. Failures raise ``PipelineError`` with a code only,
+        never request or response content.
         """
         messages = [{"role": "user", "content": prompt}]
         if system is not None:
@@ -454,6 +457,8 @@ class UnixSocketChatClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0,
+            "max_tokens": self.max_output_tokens,
+            "reasoning_effort": self.reasoning_effort,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -471,21 +476,38 @@ class UnixSocketChatClient:
             except httpx.HTTPError:
                 raise PipelineError(LLM_REQUEST_FAILED) from None
             finally:
-                self.stats.seconds += time.perf_counter() - start
-                self.stats.requests += 1
+                self._count(requests=1, seconds=time.perf_counter() - start)
             if response.status_code != 200:
                 raise PipelineError(LLM_REQUEST_FAILED)
             try:
                 payload = response.json()
-                usage = payload.get("usage") or {}
-                self.stats.prompt_tokens += int(usage.get("prompt_tokens", 0))
-                self.stats.completion_tokens += int(usage.get("completion_tokens", 0))
-                content = payload["choices"][0]["message"]["content"]
-                return response_model.model_validate_json(content)
-            except (ValueError, KeyError, IndexError, TypeError, ValidationError):
-                self.stats.invalid_outputs += 1
+                choice = payload["choices"][0]
+                tokens = payload.get("usage") or {}
+                self._count(
+                    prompt_tokens=int(tokens.get("prompt_tokens", 0)),
+                    completion_tokens=int(tokens.get("completion_tokens", 0)),
+                )
+                truncated = choice.get("finish_reason") == "length"
+                content = choice["message"]["content"]
+            except (ValueError, KeyError, IndexError, TypeError):
+                truncated, content = False, None
+            if truncated:
+                self._count(truncated=1)
+                raise PipelineError(LLM_OUTPUT_TRUNCATED)
+            try:
+                return response_model.model_validate_json(content or "")
+            except (ValueError, ValidationError):
+                self._count(invalid_outputs=1)
                 continue
         raise PipelineError(LLM_INVALID_OUTPUT)
+
+    def _count(self, seconds: float = 0.0, **counts: int) -> None:
+        with self._lock:
+            update: dict[str, Any] = {
+                name: getattr(self.usage, name) + value for name, value in counts.items()
+            }
+            update["seconds"] = self.usage.seconds + seconds
+            self.usage = self.usage.model_copy(update=update)
 
 
 # --- the LLMClient backend -------------------------------------------------------------------
@@ -498,6 +520,11 @@ class GptOssLLM:
         self.server = server
         self.client = client
         self.model_version = f"{MODEL_ID}@{revision[:12]} (vLLM {VLLM_VERSION})"
+
+    @property
+    def usage(self) -> LLMUsage:
+        """Running totals of requests, tokens and time (counts only)."""
+        return self.client.usage
 
     def generate(
         self, prompt: str, response_model: type[M], file_id: str, system: str | None = None
@@ -535,7 +562,11 @@ def start_gpt_oss(settings: LLMServerConfig) -> GptOssLLM:
     server = LLMServer.start(command, env)
     try:
         server.wait_ready(settings.startup_timeout_s)
-        client = UnixSocketChatClient(server.socket_path)
+        client = UnixSocketChatClient(
+            server.socket_path,
+            max_output_tokens=settings.max_output_tokens,
+            reasoning_effort=settings.reasoning_effort,
+        )
     except BaseException:
         server.stop()
         raise

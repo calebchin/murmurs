@@ -42,6 +42,7 @@ from murmurs.stages import Backends
 from murmurs.store import ArtifactStore
 
 VERB, INT = TranscriptMode.VERBATIM, TranscriptMode.INTENDED
+DRAFT_ID = "nyralabs/CrisperWhisper2.0_turbo"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -96,6 +97,7 @@ class FakeModel:
         self.fail = fail
         self.threads: list[int] = []
         self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.speculative: list[bool] = []
 
     def _result(self, mode: str) -> SimpleNamespace:
         words = [SimpleNamespace(word=w, start=s, end=e) for w, s, e in self.words]
@@ -114,20 +116,29 @@ class FakeModel:
     def transcribe(self, audio: Any, *, mode: str, **kwargs: Any) -> Any:
         self.threads.append(threading.get_ident())
         self.calls.append(("single", (mode,)))
+        self.speculative.append(kwargs.pop("speculative_decoding", False))
+        assert kwargs == {"sr": 16_000, "language": "en", "word_timestamps": True}
         if self.fail:
             raise RuntimeError(f"decoder failed near {SENTINEL}")
         return self._result(mode)
 
 
 def _transcriber(
-    config: JobConfig, model: FakeModel, tmp_path: Path, load_threads: list[int] | None = None
+    config: JobConfig,
+    model: FakeModel,
+    tmp_path: Path,
+    load_threads: list[int] | None = None,
+    draft: tuple[Path, str] | None = None,
+    loaded_drafts: list[Path | None] | None = None,
 ) -> CrisperWhisperTranscriber:
-    def load(model_dir: Path, device: str, compute_type: str) -> FakeModel:
+    def load(model_dir: Path, device: str, compute_type: str, draft_dir: Path | None) -> FakeModel:
         if load_threads is not None:
             load_threads.append(threading.get_ident())
+        if loaded_drafts is not None:
+            loaded_drafts.append(draft_dir)
         return model
 
-    return CrisperWhisperTranscriber(config, tmp_path, COMMIT, load_model=load)
+    return CrisperWhisperTranscriber(config, tmp_path, COMMIT, load_model=load, draft=draft)
 
 
 @pytest.fixture
@@ -164,6 +175,28 @@ def test_single_mode_uses_single_pass_and_returns_only_that_mode(
     assert set(result) == {INT}
 
 
+def test_draft_model_runs_speculative_single_passes(config: JobConfig, tmp_path: Path) -> None:
+    config = config.model_copy(
+        update={"transcription": config.transcription.model_copy(update={"draft_model": DRAFT_ID})}
+    )
+    model = FakeModel([("hi.", 0.1, 0.5)])
+    drafts: list[Path | None] = []
+    draft = (tmp_path / "draft", COMMIT)
+    transcriber = _transcriber(config, model, tmp_path, draft=draft, loaded_drafts=drafts)
+    out = transcriber.transcribe(_wave(), "f1", [VERB, INT])
+    assert set(out) == {VERB, INT} and drafts == [tmp_path / "draft"]
+    assert model.calls == [("single", ("verbatim",)), ("single", ("intended",))]
+    assert model.speculative == [True, True]
+    assert DRAFT_ID in transcriber.model_version
+
+
+def test_without_a_draft_model_nothing_is_speculative(config: JobConfig, tmp_path: Path) -> None:
+    model = FakeModel([("hi.", 0.1, 0.5)])
+    drafts: list[Path | None] = []
+    _transcriber(config, model, tmp_path, loaded_drafts=drafts).transcribe(_wave(), "f1", [VERB])
+    assert drafts == [None] and model.speculative == [False]
+
+
 def test_model_failure_is_a_coded_error_without_text(config: JobConfig, tmp_path: Path) -> None:
     transcriber = _transcriber(config, FakeModel([], fail=True), tmp_path)
     with pytest.raises(PipelineError) as info:
@@ -180,7 +213,7 @@ def test_wrong_sample_rate_is_rejected(config: JobConfig, tmp_path: Path) -> Non
 
 
 def test_load_failure_is_a_setup_error(config: JobConfig, tmp_path: Path) -> None:
-    def load(model_dir: Path, device: str, compute_type: str) -> Any:
+    def load(model_dir: Path, device: str, compute_type: str, draft_dir: Path | None) -> Any:
         raise RuntimeError(SENTINEL)
 
     with pytest.raises(BackendSetupError) as info:
@@ -191,7 +224,7 @@ def test_load_failure_is_a_setup_error(config: JobConfig, tmp_path: Path) -> Non
 def test_cpu_runs_in_float32(config: JobConfig, tmp_path: Path) -> None:
     seen: list[tuple[str, str]] = []
 
-    def load(model_dir: Path, device: str, compute_type: str) -> FakeModel:
+    def load(model_dir: Path, device: str, compute_type: str, draft_dir: Path | None) -> FakeModel:
         seen.append((device, compute_type))
         return FakeModel([])
 
@@ -316,8 +349,8 @@ def caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Pa
     yield hub, ct2
 
 
-def _cache_weights(hub: Path) -> Path:
-    folder = hub / ("models--" + MODEL_ID.replace("/", "--"))
+def _cache_weights(hub: Path, model_id: str = MODEL_ID) -> Path:
+    folder = hub / ("models--" + model_id.replace("/", "--"))
     (folder / "refs").mkdir(parents=True)
     (folder / "refs" / "main").write_text(COMMIT)
     snapshot = folder / "snapshots" / COMMIT
@@ -345,6 +378,61 @@ def test_registry_declares_weights_and_conversion(stub_job: StubJob) -> None:
         WeightSpec(MODEL_ID, allow_patterns=("*.json", "*.txt", "*.safetensors"))
     ]
     assert [m.label for m in plan.prepared] == [f"{MODEL_ID} (CTranslate2 float16)"]
+
+
+def test_draft_model_adds_its_weights_and_conversion(stub_job: StubJob) -> None:
+    config = load_config(stub_job(transcription={"model": MODEL_ID, "draft_model": DRAFT_ID}))
+    plan = registry.required_weights(config, [BackendKind.TRANSCRIBER])
+    assert [w.repo_id for w in plan.weights] == [MODEL_ID, DRAFT_ID]
+    assert [m.label for m in plan.prepared] == [
+        f"{MODEL_ID} (CTranslate2 float16)",
+        f"{DRAFT_ID} (CTranslate2 float16)",
+    ]
+
+
+def test_draft_model_converts_into_its_own_folder(
+    caches: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import crisperwhisper.converter
+
+    hub, _ = caches
+    _cache_weights(hub, DRAFT_ID)
+    monkeypatch.setattr(crisperwhisper.converter, "ensure_ct2_model", _fake_ensure_ct2([]))
+    assert not crisper.is_converted(DRAFT_ID)
+    crisper.convert(DRAFT_ID)
+    assert crisper.is_converted(DRAFT_ID) and not crisper.is_converted()
+    assert converted_dir(COMMIT, DRAFT_ID) != converted_dir(COMMIT)
+
+
+def test_unconverted_draft_model_fails_setup(
+    stub_job: StubJob, caches: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import crisperwhisper.converter
+
+    hub, _ = caches
+    _cache_weights(hub)
+    monkeypatch.setattr(crisperwhisper.converter, "ensure_ct2_model", _fake_ensure_ct2([]))
+    crisper.convert()
+    config = load_config(stub_job(transcription={"model": MODEL_ID, "draft_model": DRAFT_ID}))
+    with pytest.raises(BackendSetupError, match=r"CrisperWhisper2\.0_turbo"):
+        create_crisperwhisper(config)
+
+
+def test_draft_model_reruns_transcription_only_when_set(stub_job: StubJob) -> None:
+    from murmurs.runner import stage_hashes
+
+    plain = load_config(stub_job())
+    spec = load_config(stub_job(transcription={"draft_model": DRAFT_ID}))
+    assert plain.transcription.draft_model is None
+    assert "draft_model" not in crisper_stage_config(plain)  # old jobs keep their hash
+    assert stage_hashes(plain)[Stage.TRANSCRIBE] != stage_hashes(spec)[Stage.TRANSCRIBE]
+    assert stage_hashes(plain)[Stage.DIARIZE] == stage_hashes(spec)[Stage.DIARIZE]
+
+
+def crisper_stage_config(config: JobConfig) -> dict[str, Any]:
+    from murmurs.stages import stage_config
+
+    return stage_config(Stage.TRANSCRIBE, config)
 
 
 def test_convert_writes_a_finished_folder_and_no_staging(

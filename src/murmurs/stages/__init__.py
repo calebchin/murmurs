@@ -24,6 +24,8 @@ from murmurs.models import (
     Transcript,
     TranscriptMode,
 )
+from murmurs.stages import correction as _correction
+from murmurs.stages import deid as _deid
 from murmurs.stages.assign import assign_speakers as assign_words
 from murmurs.stages.correction import correct_modes, prompt_hash
 from murmurs.stages.deid import deid_mode, deidentify, render_annotated, render_clean
@@ -136,7 +138,10 @@ def stage_config(stage: Stage, config: JobConfig) -> dict[str, Any]:
         case Stage.DIARIZE:
             return config.diarization.model_dump(mode="json", include={"model", "num_speakers"})
         case Stage.TRANSCRIBE:
-            return config.transcription.model_dump(mode="json")
+            values = config.transcription.model_dump(mode="json")
+            if values["draft_model"] is None:
+                del values["draft_model"]  # keeps the hash of jobs from before the field
+            return values
         case Stage.ASSIGN_SPEAKERS:
             values = config.diarization.model_dump(
                 mode="json", include={"speaker_gap_tolerance_s", "llm_correction"}
@@ -144,11 +149,16 @@ def stage_config(stage: Stage, config: JobConfig) -> dict[str, Any]:
             if config.diarization.llm_correction:
                 values["llm_model"] = config.deid.llm_model
                 values["prompt"] = prompt_hash()
+                values["reasoning_effort"] = config.deid.llm_server.reasoning_effort
+                values["chunk_tokens"] = _correction.CORRECTION_CHUNK_TOKENS
             return values
         case Stage.DETECT_PHI:
             # llm_server settings change speed and memory, not output
             values = config.deid.model_dump(mode="json", exclude={"llm_server"})
             values["prompt"] = deid_prompt_hash()
+            values["reasoning_effort"] = config.deid.llm_server.reasoning_effort
+            values["chunk_tokens"] = _deid.DEID_CHUNK_TOKENS
+            values["line_tokens"] = _deid.DEID_LINE_TOKENS
             return values
 
 
@@ -221,6 +231,7 @@ def assign_speakers(ctx: StageContext) -> None:
             _need(ctx.backends.llm),
             ctx.file_id,
             ctx.config.deid.llm_server.max_model_len,
+            max_concurrency=ctx.config.deid.llm_server.max_concurrency,
         )
     for mode in ctx.modes:
         variant = f"{mode.value}.{RULE_BASED}"
@@ -242,7 +253,8 @@ def assign_speakers(ctx: StageContext) -> None:
 
 
 def detect_phi(ctx: StageContext) -> None:
-    """Propose redactions on the final transcript of one mode (D9) with NER and the LLM.
+    """Propose redactions on the final transcript of one mode (verbatim when transcribed,
+    D9) with NER and the LLM.
 
     Writes the redaction layer (``<mode>.json``), an annotated rendering for reviewers
     (``<mode>.annotated.txt``), the clean rendering (``<mode>.clean.txt``) and a
@@ -260,6 +272,7 @@ def detect_phi(ctx: StageContext) -> None:
         ctx.file_id,
         deid.llm_server.max_model_len,
         deid.redaction_threshold,
+        max_concurrency=deid.llm_server.max_concurrency,
     )
     ctx.store.write(ctx.file_id, Stage.DETECT_PHI, layer, variant=mode.value)
     ctx.store.write_text(

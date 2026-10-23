@@ -16,6 +16,7 @@ sentence punctuation or pauses (D19).
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import os
 import platform
@@ -39,6 +40,11 @@ WEIGHT_PATTERNS = ("*.json", "*.txt", "*.safetensors")
 """The Hugging Face-format files CrisperWhisper converts from."""
 SPEC = WeightSpec(MODEL_ID, allow_patterns=WEIGHT_PATTERNS)
 
+
+def _spec(model_id: str) -> WeightSpec:
+    return WeightSpec(model_id, allow_patterns=WEIGHT_PATTERNS)
+
+
 SAMPLE_RATE = 16_000
 STORED_PRECISION = "float16"
 """Precision of the converted model on disk. On CPU it runs as float32 (CTranslate2
@@ -57,8 +63,9 @@ UNSUPPORTED_SAMPLE_RATE = "UNSUPPORTED_SAMPLE_RATE"
 
 RawWord = tuple[str, float | None, float | None]
 """A word as the model returns it: text, start and end (times may be missing)."""
-LoadModel = Callable[[Path, str, str], Any]
-"""Loads a model from a converted folder, given a device and compute type."""
+LoadModel = Callable[[Path, str, str, Path | None], Any]
+"""Loads a model from a converted folder, given a device, compute type and optionally a
+converted draft model folder for speculative decoding."""
 
 
 # --- backend selection (D4) ---------------------------------------------------------------
@@ -94,9 +101,9 @@ def _cache_root() -> Path:
     return Path(os.environ.get("CRISPERWHISPER_CACHE", default))
 
 
-def converted_dir(revision: str) -> Path:
+def converted_dir(revision: str, model_id: str = MODEL_ID) -> Path:
     """Where the converted model for a given weights revision lives."""
-    slug = MODEL_ID.replace("/", "--")
+    slug = model_id.replace("/", "--")
     return _cache_root() / "murmurs" / f"{slug}--{revision}--{STORED_PRECISION}"
 
 
@@ -104,22 +111,22 @@ def _is_ready(folder: Path) -> bool:
     return (folder / "model.bin").is_file() and (folder / READY_MARKER).is_file()
 
 
-def is_converted() -> bool:
+def is_converted(model_id: str = MODEL_ID) -> bool:
     """Whether the cached weights have a finished conversion. Offline and fast."""
-    snapshot = cached_snapshot(SPEC)
-    return snapshot is not None and _is_ready(converted_dir(snapshot.name))
+    snapshot = cached_snapshot(_spec(model_id))
+    return snapshot is not None and _is_ready(converted_dir(snapshot.name, model_id))
 
 
-def convert() -> None:
+def convert(model_id: str = MODEL_ID) -> None:
     """Convert the cached weights to CTranslate2 format, if not done already.
 
     Runs offline. Converts into a staging folder next to the target and renames it into
     place, so an interrupted conversion leaves nothing that looks finished.
     """
-    snapshot = cached_snapshot(SPEC)
+    snapshot = cached_snapshot(_spec(model_id))
     if snapshot is None:
         raise RuntimeError("weights are not cached")
-    final = converted_dir(snapshot.name)
+    final = converted_dir(snapshot.name, model_id)
     if _is_ready(final):
         return
     from crisperwhisper.converter import ensure_ct2_model
@@ -136,18 +143,25 @@ def convert() -> None:
 def crisperwhisper_weights(config: JobConfig) -> Sequence[WeightSpec]:
     """The Hugging Face weights to download. Fails setup if the backend cannot run here."""
     check_backend(config.transcription.backend)
-    return [SPEC]
+    return [_spec(model_id) for model_id in _model_ids(config)]
 
 
 def crisperwhisper_prepared(config: JobConfig) -> Sequence[PreparedModel]:
-    """The CTranslate2 conversion that ``murmurs models download`` runs after downloading."""
+    """The CTranslate2 conversions that ``murmurs models download`` runs after
+    downloading: the model, and the draft model if speculative decoding is on."""
     return [
         PreparedModel(
-            label=f"{MODEL_ID} (CTranslate2 {STORED_PRECISION})",
-            is_ready=is_converted,
-            prepare=convert,
+            label=f"{model_id} (CTranslate2 {STORED_PRECISION})",
+            is_ready=functools.partial(is_converted, model_id),
+            prepare=functools.partial(convert, model_id),
         )
+        for model_id in _model_ids(config)
     ]
+
+
+def _model_ids(config: JobConfig) -> list[str]:
+    draft = config.transcription.draft_model
+    return [MODEL_ID] if draft is None else [MODEL_ID, draft]
 
 
 # --- converting model output to transcripts (D18, D19) --------------------------------------
@@ -199,7 +213,9 @@ def words_to_transcript(
 # --- the transcriber ---------------------------------------------------------------------
 
 
-def _load_crisperwhisper(model_dir: Path, device: str, compute_type: str) -> Any:
+def _load_crisperwhisper(
+    model_dir: Path, device: str, compute_type: str, draft_dir: Path | None
+) -> Any:
     import logging
 
     from crisperwhisper import CrisperWhisperModel
@@ -208,15 +224,22 @@ def _load_crisperwhisper(model_dir: Path, device: str, compute_type: str) -> Any
     logging.getLogger("crisperwhisper").setLevel(logging.WARNING)
 
     return CrisperWhisperModel(
-        str(model_dir), backend="ct2", compute_type=compute_type, device=device
+        str(model_dir),
+        backend="ct2",
+        compute_type=compute_type,
+        device=device,
+        draft_model=None if draft_dir is None else str(draft_dir),
     )
 
 
 class CrisperWhisperTranscriber:
     """``Transcriber`` backed by CrisperWhisper on one dedicated thread.
 
-    ``model_dir`` is a converted (CTranslate2) model folder. ``load_model`` exists for
-    tests; it runs on the dedicated thread like every other model call.
+    ``model_dir`` is a converted (CTranslate2) model folder. ``draft`` is a converted
+    draft model folder and its weights revision: with it, every mode is decoded in its
+    own speculative pass (the draft proposes tokens, the model checks them), which is
+    faster but can change a few words. ``load_model`` exists for tests; it runs on the
+    dedicated thread like every other model call.
     """
 
     def __init__(
@@ -225,6 +248,7 @@ class CrisperWhisperTranscriber:
         model_dir: Path,
         revision: str,
         load_model: LoadModel = _load_crisperwhisper,
+        draft: tuple[Path, str] | None = None,
     ) -> None:
         self.language = config.transcription.language
         self.device, self.device_fallback = resolve_device(config.compute.device)
@@ -232,19 +256,25 @@ class CrisperWhisperTranscriber:
         self.compute_type = STORED_PRECISION if self.device == "cuda" else "float32"
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="crisperwhisper")
         self._closed = False
+        self.speculative = draft is not None
+        draft_dir = None if draft is None else draft[0]
         try:
             self._model = self._executor.submit(
-                load_model, model_dir, self.device, self.compute_type
+                load_model, model_dir, self.device, self.compute_type, draft_dir
             ).result()
         except Exception:
             self._executor.shutdown(wait=False)
             raise BackendSetupError(f"could not load {MODEL_ID} from {model_dir}") from None
         self.model_version = f"{MODEL_ID}@{revision[:12]} (ct2 {self.compute_type})"
+        if draft is not None:
+            draft_id = config.transcription.draft_model
+            self.model_version += f" + draft {draft_id}@{draft[1][:12]}"
 
     def transcribe(
         self, waveform: Waveform, file_id: str, modes: Sequence[TranscriptMode]
     ) -> dict[TranscriptMode, Transcript]:
-        """One transcript per requested mode, from a single model pass when both are asked."""
+        """One transcript per requested mode: from a single model pass when both are asked,
+        or one speculative pass per mode with a draft model."""
         if waveform.sample_rate != SAMPLE_RATE:
             raise PipelineError(UNSUPPORTED_SAMPLE_RATE)
         names = tuple(TranscriptMode(m).value for m in modes)
@@ -280,7 +310,12 @@ class CrisperWhisperTranscriber:
     def _run(self, samples: Any, modes: tuple[str, ...]) -> Mapping[str, list[RawWord]]:
         """Runs on the dedicated thread."""
         common = {"sr": SAMPLE_RATE, "language": self.language, "word_timestamps": True}
-        if len(modes) > 1:
+        if self.speculative:
+            results = tuple(
+                self._model.transcribe(samples, mode=mode, speculative_decoding=True, **common)
+                for mode in modes
+            )
+        elif len(modes) > 1:
             results = self._model.transcribe_dual(samples, modes=modes, **common)
         else:
             results = (self._model.transcribe(samples, mode=modes[0], **common),)
@@ -299,7 +334,18 @@ def create_crisperwhisper(config: JobConfig) -> CrisperWhisperTranscriber:
         raise BackendSetupError(
             f"{MODEL_ID} is not downloaded and converted; run `murmurs models download`"
         )
-    return CrisperWhisperTranscriber(config, converted_dir(snapshot.name), snapshot.name)
+    draft = None
+    if config.transcription.draft_model is not None:
+        draft_id = config.transcription.draft_model
+        draft_snapshot = cached_snapshot(_spec(draft_id))
+        if draft_snapshot is None or not _is_ready(converted_dir(draft_snapshot.name, draft_id)):
+            raise BackendSetupError(
+                f"{draft_id} is not downloaded and converted; run `murmurs models download`"
+            )
+        draft = (converted_dir(draft_snapshot.name, draft_id), draft_snapshot.name)
+    return CrisperWhisperTranscriber(
+        config, converted_dir(snapshot.name), snapshot.name, draft=draft
+    )
 
 
 if TYPE_CHECKING:

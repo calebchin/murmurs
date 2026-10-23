@@ -26,7 +26,6 @@ from pydantic import BaseModel, ConfigDict
 
 from murmurs.backends import LLMClient, NERDetector
 from murmurs.config import EntityAction, EntityType
-from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
 from murmurs.models import (
     DeidReport,
     DetectorSource,
@@ -37,11 +36,22 @@ from murmurs.models import (
     TranscriptRef,
 )
 from murmurs.stages.correction import CHARS_PER_TOKEN, CHUNK_SHARE, CONTEXT_SHARE
+from murmurs.stages.llm_chunks import halves, run_chunks
 from murmurs.store import canonical_text
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 SYSTEM_PROMPT = PROMPT_DIR / "deid_system.txt"
 USER_PROMPT = PROMPT_DIR / "deid_user.txt"
+
+DEID_CHUNK_TOKENS = 1000.0
+"""Transcript tokens a chunk owns. The response lists every entity in the chunk, so its
+length grows with the chunk; about 1,000 tokens keeps it well under the output cap and
+gives the server many requests to run concurrently (P3-05)."""
+DEID_LINE_TOKENS = 250.0
+"""Longest line the LLM sees; longer speaker segments are split between words, so a
+chunk can always be split into smaller ones (see ``llm_lines``)."""
+SPLIT_CONTEXT_LINES = 2
+"""Lines of the other half shown as context when a chunk is split."""
 
 LLM_ONLY_CONFIDENCE = 0.7
 """Confidence of a span only the LLM found (MVP; refined after the MVP)."""
@@ -81,8 +91,8 @@ def prompt_hash() -> str:
 
 
 def deid_mode(modes: Sequence[TranscriptMode]) -> TranscriptMode:
-    """The mode PHI detection runs on: intended if configured, else the first (D9)."""
-    return TranscriptMode.INTENDED if TranscriptMode.INTENDED in modes else modes[0]
+    """The mode PHI detection runs on: verbatim if configured, else the first (D9)."""
+    return TranscriptMode.VERBATIM if TranscriptMode.VERBATIM in modes else modes[0]
 
 
 # --- lines and chunks -------------------------------------------------------------------------
@@ -90,7 +100,8 @@ def deid_mode(modes: Sequence[TranscriptMode]) -> TranscriptMode:
 
 @dataclass(frozen=True)
 class Line:
-    """One line of the canonical text: a speaker segment."""
+    """One line of the canonical text (a speaker segment), or, for the LLM, a piece of
+    one (see ``llm_lines``)."""
 
     number: int
     start: int
@@ -105,6 +116,39 @@ def lines_of(transcript: Transcript) -> list[Line]:
     for i, segment in enumerate(transcript.segments):
         lines.append(Line(i, offset, segment.text, segment.speaker or "UNKNOWN"))
         offset += len(segment.text) + 1
+    return lines
+
+
+def _pieces(line: Line) -> list[tuple[int, str]]:
+    """``(offset, text)`` pieces of a line, split between words so each costs at most
+    ``DEID_LINE_TOKENS`` (a single longer word stays whole)."""
+    if _cost(line) <= DEID_LINE_TOKENS:
+        return [(0, line.text)]
+    max_chars = DEID_LINE_TOKENS * CHARS_PER_TOKEN - len(line.speaker) - 10
+    pieces: list[tuple[int, str]] = []
+    first = last = None
+    for word in re.finditer(r"\S+", line.text):
+        if first is not None and last is not None and word.end() - first > max_chars:
+            pieces.append((first, line.text[first:last]))
+            first = None
+        if first is None:
+            first = word.start()
+        last = word.end()
+    if first is not None and last is not None:
+        pieces.append((first, line.text[first:last]))
+    return pieces
+
+
+def llm_lines(transcript: Transcript) -> list[Line]:
+    """The lines the LLM sees: ``lines_of``, with any line longer than
+    ``DEID_LINE_TOKENS`` split between words into consecutive pieces, numbered in order.
+
+    Short lines let a chunk that keeps failing be split until every part is answered,
+    so no long monologue goes unchecked. Renderings still use ``lines_of``."""
+    lines: list[Line] = []
+    for line in lines_of(transcript):
+        for offset, text in _pieces(line):
+            lines.append(Line(len(lines), line.start + offset, text, line.speaker))
     return lines
 
 
@@ -127,9 +171,11 @@ def _cost(line: Line) -> float:
 
 
 def chunk_lines(lines: Sequence[Line], max_model_len: int) -> list[LineChunk]:
-    """Group lines into chunks sized for the LLM's context window, each with context
-    lines on both sides. Every line belongs to exactly one chunk's own lines."""
-    budget = max(200.0, max_model_len / CHUNK_SHARE)
+    """Group lines into chunks of about ``DEID_CHUNK_TOKENS`` (less if the context window
+    is small), each with context lines on both sides. Every line belongs to exactly one
+    chunk's own lines. Small chunks keep each response short and give the server
+    more requests to run concurrently."""
+    budget = max(200.0, min(DEID_CHUNK_TOKENS, max_model_len / CHUNK_SHARE))
     context_budget = budget / CONTEXT_SHARE
     groups: list[tuple[int, int]] = []
     first, size = 0, 0.0
@@ -158,6 +204,19 @@ def chunk_lines(lines: Sequence[Line], max_model_len: int) -> list[LineChunk]:
             size += _cost(lines[i])
         chunks.append(LineChunk(before, list(lines[first:last]), after))
     return chunks
+
+
+def split_chunk(chunk: LineChunk) -> tuple[LineChunk, LineChunk] | None:
+    """Two chunks, each owning half of ``chunk``'s lines, or None for a one-line chunk.
+    Each half shows a couple of the other half's lines as context."""
+    parts = halves(chunk.own)
+    if parts is None:
+        return None
+    first, second = parts
+    return (
+        LineChunk(chunk.before, first, second[:SPLIT_CONTEXT_LINES]),
+        LineChunk(first[-SPLIT_CONTEXT_LINES:], second, chunk.after),
+    )
 
 
 def render_chunk(chunk: LineChunk) -> str:
@@ -200,6 +259,7 @@ class Candidate:
 @dataclass
 class _Counts:
     n_chunks: int = 0
+    splits: int = 0
     failed_chunks: int = 0
     proposed: int = 0
     rejected: Counter[str] = field(default_factory=Counter)
@@ -219,16 +279,19 @@ def llm_candidates(
     file_id: str,
     entity_types: Sequence[EntityType],
     max_model_len: int,
+    *,
+    max_concurrency: int = 1,
 ) -> tuple[list[Candidate], _Counts]:
     """Ask the LLM for entities chunk by chunk and turn the valid ones into spans.
 
-    An entity is valid if its line is one of the chunk's own lines, its type is a
-    configured (non-ignored) type, and its text occurs in that line. Each accepted
-    (text, type) is then marked at every whole-word occurrence in the whole text.
-    A chunk whose output stays invalid is skipped and counted; a failed request fails
-    the file.
+    Chunks go to the LLM up to ``max_concurrency`` at a time; a chunk whose response is
+    truncated or invalid is split in half (see ``llm_chunks``). An entity is valid if
+    its line is one of the chunk's own lines, its type is a configured (non-ignored)
+    type, and its text occurs in that line. Each accepted (text, type) is then marked at
+    every whole-word occurrence in the whole text, in chunk order. A chunk that stays
+    unusable is skipped and counted; a failed request fails the file.
     """
-    lines = lines_of(transcript)
+    lines = llm_lines(transcript)
     text = canonical_text(transcript)
     usable = [e for e in entity_types if e.action is not EntityAction.IGNORE]
     names = {e.name for e in usable}
@@ -236,16 +299,16 @@ def llm_candidates(
     accepted: dict[tuple[str, str], int] = {}  # (surface, type) -> line where first found
     by_line = {line.number: line for line in lines}
 
-    for chunk in chunk_lines(lines, max_model_len):
-        counts.n_chunks += 1
+    def ask(chunk: LineChunk) -> FoundEntities:
         system, user = build_prompt(chunk, usable)
-        try:
-            response = llm.generate(user, FoundEntities, file_id, system=system)
-        except PipelineError as exc:
-            if exc.code != LLM_INVALID_OUTPUT:
-                raise
-            counts.failed_chunks += 1
-            continue
+        return llm.generate(user, FoundEntities, file_id, system=system)
+
+    chunks = chunk_lines(lines, max_model_len)
+    outcome = run_chunks(chunks, ask, split_chunk, max_concurrency)
+    counts.n_chunks = len(chunks)
+    counts.splits = outcome.splits
+    counts.failed_chunks = outcome.failed
+    for chunk, response in outcome.results:
         for entity in response.entities:
             counts.proposed += 1
             surface = " ".join(entity.text.split())
@@ -354,12 +417,17 @@ def deidentify(
     file_id: str,
     max_model_len: int,
     redaction_threshold: float,
+    *,
+    max_concurrency: int = 1,
 ) -> tuple[RedactionLayer, DeidReport]:
     """Detect PHI in a transcript and return the redaction layer and counts."""
     text = canonical_text(transcript)
     by_name = {e.name: e for e in entity_types}
+    usage_before = llm.usage.model_copy()
     ner_kept, ner_ignored = ner_candidates(ner.detect(text, file_id), entity_types)
-    llm_found, counts = llm_candidates(transcript, llm, file_id, entity_types, max_model_len)
+    llm_found, counts = llm_candidates(
+        transcript, llm, file_id, entity_types, max_model_len, max_concurrency=max_concurrency
+    )
     merged = merge(ner_kept + llm_found, entity_types)
 
     indexes: dict[str, dict[str, int]] = {}
@@ -387,7 +455,9 @@ def deidentify(
         file_id=file_id,
         mode=transcript.mode,
         n_chunks=counts.n_chunks,
+        chunk_splits=counts.splits,
         failed_chunks=counts.failed_chunks,
+        llm=llm.usage.minus(usage_before),
         llm_proposed=counts.proposed,
         llm_rejected=dict(counts.rejected),
         llm_spans=counts.spans,

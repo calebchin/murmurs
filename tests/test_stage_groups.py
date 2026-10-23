@@ -376,7 +376,7 @@ def test_crisperwhisper_close_drops_model_on_its_thread_and_stops_it(
         def __del__(self) -> None:
             threads.append(threading.get_ident())
 
-    def load(model_dir: Path, device: str, compute_type: str) -> Model:
+    def load(model_dir: Path, device: str, compute_type: str, draft_dir: Path | None) -> Model:
         threads.append(threading.get_ident())
         return Model()
 

@@ -21,7 +21,6 @@ from string import Template
 from pydantic import BaseModel, ConfigDict
 
 from murmurs.backends import LLMClient
-from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
 from murmurs.models import (
     UNKNOWN_SPEAKER,
     SpeakerCorrection,
@@ -31,6 +30,7 @@ from murmurs.models import (
     Word,
 )
 from murmurs.stages.assign import _Turns, relabel, words_of
+from murmurs.stages.llm_chunks import halves, run_chunks
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 SYSTEM_PROMPT = PROMPT_DIR / "speaker_correction_system.txt"
@@ -43,6 +43,11 @@ CHUNK_SHARE = 4
 context lines, instructions and the response."""
 CONTEXT_SHARE = 8
 """Context shown before and after a chunk: up to chunk budget / CONTEXT_SHARE each side."""
+CORRECTION_CHUNK_TOKENS = 1024.0
+"""Transcript tokens a chunk owns. The model reasons for a few thousand tokens per
+request whatever the chunk size, so many small chunks run concurrently finish sooner
+than a few large ones: on a 68-minute podcast, 1,024-token chunks took 95 s against
+150 s for a quarter of a 32k context (P3-05)."""
 
 REJECT_INVALID_RANGE = "invalid_range"
 REJECT_MISSING_WORD = "missing_word"
@@ -125,12 +130,13 @@ def _lines(words: Sequence[Word], budget: float) -> list[_Line]:
 
 
 def chunk_transcript(words: Sequence[Word], max_model_len: int) -> list[Chunk]:
-    """Split a labeled transcript into chunks sized for the LLM's context window.
+    """Split a labeled transcript into chunks of about ``CORRECTION_CHUNK_TOKENS`` (less
+    if the context window is small).
 
     Every word belongs to exactly one chunk's own lines. Each chunk also shows whole
     lines before and after it as context, so turns at its edges are seen whole.
     """
-    budget = max(200.0, max_model_len / CHUNK_SHARE)
+    budget = max(200.0, min(CORRECTION_CHUNK_TOKENS, max_model_len / CHUNK_SHARE))
     context_budget = budget / CONTEXT_SHARE
     lines = _lines(words, budget)
     cost = [sum(_word_tokens(words[i], i) for i in range(ln.start, ln.end)) for ln in lines]
@@ -209,9 +215,27 @@ def check_change(
     return None
 
 
+SPLIT_CONTEXT_LINES = 2
+"""Lines of the other half shown as context when a chunk is split."""
+
+
+def split_chunk(chunk: Chunk) -> tuple[Chunk, Chunk] | None:
+    """Two chunks, each owning half of ``chunk``'s lines, or None for a one-line chunk.
+    Each half shows a couple of the other half's lines as context."""
+    parts = halves(chunk.own)
+    if parts is None:
+        return None
+    first, second = parts
+    return (
+        Chunk(before=chunk.before, own=first, after=second[:SPLIT_CONTEXT_LINES]),
+        Chunk(before=first[-SPLIT_CONTEXT_LINES:], own=second, after=chunk.after),
+    )
+
+
 @dataclass
 class _Counts:
     n_chunks: int = 0
+    splits: int = 0
     failed_chunks: int = 0
     proposed: int = 0
     applied: int = 0
@@ -221,13 +245,20 @@ class _Counts:
 
 
 def correct_transcript(
-    transcript: Transcript, llm: LLMClient, file_id: str, max_model_len: int
+    transcript: Transcript,
+    llm: LLMClient,
+    file_id: str,
+    max_model_len: int,
+    *,
+    max_concurrency: int = 1,
 ) -> tuple[Transcript, set[int], _Counts]:
     """Run the LLM over ``transcript`` and apply its valid label changes.
 
-    Returns the corrected transcript, the indices of words whose speaker changed, and
-    counts. A chunk whose output stays invalid keeps its labels; a failed request
-    raises ``PipelineError`` and fails the file.
+    Chunks go to the LLM up to ``max_concurrency`` at a time; a chunk whose response is
+    truncated or invalid is split in half (see ``llm_chunks``). Returns the corrected
+    transcript, the indices of words whose speaker changed, and counts. A chunk that
+    stays unusable keeps its labels; a failed request raises ``PipelineError`` and fails
+    the file.
     """
     words = words_of(transcript)
     speakers = sorted({w.speaker for w in words if w.speaker and w.speaker != UNKNOWN_SPEAKER})
@@ -236,16 +267,16 @@ def correct_transcript(
     if not speakers:
         return transcript, set(), counts
 
-    for chunk in chunk_transcript(words, max_model_len):
-        counts.n_chunks += 1
+    def ask(chunk: Chunk) -> SpeakerCorrections:
         system, user = build_prompt(chunk, words, speakers)
-        try:
-            response = llm.generate(user, SpeakerCorrections, file_id, system=system)
-        except PipelineError as exc:
-            if exc.code != LLM_INVALID_OUTPUT:
-                raise
-            counts.failed_chunks += 1
-            continue
+        return llm.generate(user, SpeakerCorrections, file_id, system=system)
+
+    chunks = chunk_transcript(words, max_model_len)
+    outcome = run_chunks(chunks, ask, split_chunk, max_concurrency)
+    counts.n_chunks = len(chunks)
+    counts.splits = outcome.splits
+    counts.failed_chunks = outcome.failed
+    for chunk, response in outcome.results:
         for change in response.changes:
             counts.proposed += 1
             reason = check_change(change, words, chunk.own_words, speakers)
@@ -286,13 +317,18 @@ def correct_modes(
     llm: LLMClient,
     file_id: str,
     max_model_len: int,
+    *,
+    max_concurrency: int = 1,
 ) -> tuple[dict[TranscriptMode, Transcript], SpeakerCorrection]:
     """Correct one mode with the LLM (intended if present) and carry the result to the
     other modes by word time. Returns the corrected transcripts and the report."""
+    usage_before = llm.usage.model_copy()
     source = (
         TranscriptMode.INTENDED if TranscriptMode.INTENDED in rule_based else next(iter(rule_based))
     )
-    corrected, changed, counts = correct_transcript(rule_based[source], llm, file_id, max_model_len)
+    corrected, changed, counts = correct_transcript(
+        rule_based[source], llm, file_id, max_model_len, max_concurrency=max_concurrency
+    )
     source_words = words_of(rule_based[source])
     new_labels = [w.speaker or UNKNOWN_SPEAKER for w in words_of(corrected)]
     final = {source: corrected}
@@ -312,7 +348,9 @@ def correct_modes(
         enabled=True,
         source_mode=source,
         n_chunks=counts.n_chunks,
+        chunk_splits=counts.splits,
         failed_chunks=counts.failed_chunks,
+        llm=llm.usage.minus(usage_before),
         proposed=counts.proposed,
         applied=counts.applied,
         rejected=dict(counts.rejected),

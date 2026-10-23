@@ -372,6 +372,7 @@ def eval_run(
                 evalset.set_id,
                 job.deid.llm_server.max_model_len,
                 job.deid.redaction_threshold,
+                max_concurrency=job.deid.llm_server.max_concurrency,
             )
             scores.append(score_set(evalset, layer.spans, perf_counter() - started))
             with atomic_writer(out_dir / f"{evalset.set_id}.annotated.txt") as f:

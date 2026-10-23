@@ -17,6 +17,7 @@ from murmurs.config import JobConfig, Stage, load_config
 from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
 from murmurs.models import (
     UNKNOWN_SPEAKER,
+    LLMUsage,
     Segment,
     SpeakerCorrection,
     StageStatus,
@@ -46,6 +47,7 @@ class ScriptedLLM:
     """An ``LLMClient`` whose responses come from a function of the user prompt."""
 
     model_version = "scripted"
+    usage = LLMUsage()  # counts only; scripted LLMs report no tokens
 
     def __init__(self, respond: Callable[[str], Any]) -> None:
         self.respond = respond
@@ -165,7 +167,8 @@ def test_change_text_whitespace_is_normalised() -> None:
 def test_chunk_with_persistently_invalid_output_keeps_its_labels() -> None:
     llm = ScriptedLLM(lambda prompt: PipelineError(LLM_INVALID_OUTPUT))
     corrected, changed, counts = correct_transcript(_three(), llm, "f1", 32768)
-    assert counts.failed_chunks == 1 and not changed
+    # Invalid output splits the 3-line chunk down to single lines, each of which fails.
+    assert counts.splits == 2 and counts.failed_chunks == 3 and not changed
     assert _labels(corrected) == _labels(_three())
 
 
@@ -215,6 +218,13 @@ def test_chunks_cover_every_word_once_with_context_at_the_edges() -> None:
         assert nxt.before and nxt.before[-1] == prev.own[-1]
     text = render_chunk(chunks[1], words)
     assert text.startswith("CONTEXT ") and text.rstrip().splitlines()[-1].startswith("CONTEXT ")
+
+
+def test_correction_chunks_are_small_whatever_the_context_window() -> None:
+    words = words_of(_long(400))
+    chunks = chunk_transcript(words, max_model_len=131072)
+    assert len(chunks) > 10  # about 1,000 tokens each, not max_model_len / 4
+    assert [i for c in chunks for i in c.own_words] == list(range(len(words)))
 
 
 def test_a_run_longer_than_a_chunk_is_split() -> None:
@@ -477,3 +487,56 @@ def test_label_change_schema_is_strict() -> None:
 def test_prompt_hash_tracks_the_prompt_files() -> None:
     assert correction.prompt_hash() == correction.prompt_hash()
     assert len(correction.prompt_hash()) == 16
+
+
+# --- concurrency and splitting (LLM speed-ups) ------------------------------------------------
+
+
+def _own_line_count(prompt: str) -> int:
+    body = prompt.split("never change words on CONTEXT lines.", 1)[1].split("List the label", 1)[0]
+    return sum(1 for line in body.splitlines() if line.startswith("SPEAKER_"))
+
+
+def test_truncated_chunks_are_split_and_every_word_is_still_covered() -> None:
+    transcript = _long(24)
+    owned: list[int] = []
+
+    def respond(prompt: str) -> Any:
+        if _own_line_count(prompt) > 2:
+            return PipelineError("LLM_OUTPUT_TRUNCATED")
+        owned.extend(int(n) for n in re.findall(r"^SPEAKER_\d+: \[(\d+)\]", prompt, re.M))
+        return _changes()
+
+    _, _, counts = correct_transcript(transcript, ScriptedLLM(respond), "f1", 1024)
+    assert counts.splits > 0 and counts.failed_chunks == 0
+    first_words = sorted(owned)
+    assert first_words == sorted(set(first_words))  # no line was answered twice
+
+
+def test_concurrency_does_not_change_the_result() -> None:
+    transcript = _long(30)
+
+    def respond(prompt: str) -> Any:
+        body = prompt.split("never change words on CONTEXT lines.", 1)[1]
+        for line in body.splitlines():
+            if line.startswith(f"{B}: "):
+                number, text = re.match(r"\[(\d+)\](\S+)", line[len(B) + 2 :]).groups()  # type: ignore[union-attr]
+                return _changes((int(number), int(number), text, A))
+        return _changes()
+
+    one, changed_one, _ = correct_transcript(
+        transcript, ScriptedLLM(respond), "f1", 1024, max_concurrency=1
+    )
+    many, changed_many, _ = correct_transcript(
+        transcript, ScriptedLLM(respond), "f1", 1024, max_concurrency=8
+    )
+    assert one == many and changed_one == changed_many and changed_one
+
+
+def test_report_records_splits_and_llm_usage() -> None:
+    from murmurs.backends.stubs import StubLLMClient
+
+    llm = StubLLMClient(response={"changes": []})
+    _, report = correct_modes({INT: _three()}, llm, "f1", 32768, max_concurrency=4)
+    assert report.schema_version == 2 and report.chunk_splits == 0
+    assert report.llm.requests == report.n_chunks == 1

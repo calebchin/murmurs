@@ -119,3 +119,26 @@ def test_no_export_before_speaker_assignment(stub_job: StubJob) -> None:
     run_job(config, "job", console=io.StringIO())
     store = ArtifactStore(config.data.output_dir, config.data.input_dir, "job")
     assert not store.transcripts_dir.exists()
+
+
+def test_deid_outputs_are_exported_next_to_the_original_transcript(stub_job: StubJob) -> None:
+    config = _config(stub_job, Stage.DETECT_PHI)
+    summary = run_job(config, "job", console=io.StringIO())
+    assert summary.done and not summary.failed
+    store = ArtifactStore(config.data.output_dir, config.data.input_dir, "job")
+    deid_files = {
+        "verbatim.json",
+        "verbatim.redactions.json",
+        "verbatim.annotated.txt",
+        "verbatim.clean.txt",
+        "deid_report.json",
+    }
+    for folder in store.transcripts_dir.iterdir():
+        names = {p.name for p in folder.iterdir()}
+        assert deid_files <= names and "verbatim.txt" in names
+        assert "intended.redactions.json" not in names
+        file_id = next(f for f in summary.done if folder.name.endswith(f[:8]))
+        original = store.artifact_path(file_id, Stage.ASSIGN_SPEAKERS, "verbatim", ".json")
+        assert (folder / "verbatim.json").read_text() == original.read_text()
+        layer = store.artifact_path(file_id, Stage.DETECT_PHI, "verbatim", ".json")
+        assert (folder / "verbatim.redactions.json").read_text() == layer.read_text()
