@@ -3,7 +3,9 @@
 import io
 from pathlib import Path
 
+import pytest
 from conftest import StubJob
+from fixtures.audio import tone_wav_bytes
 
 from murmurs.config import JobConfig, Stage, load_config
 from murmurs.models import Segment, Transcript, TranscriptMode, Word
@@ -11,6 +13,7 @@ from murmurs.runner import InputFile, export_folder_name, run_job
 from murmurs.store import (
     WORDS_TSV_HEADER,
     ArtifactStore,
+    StoreError,
     canonical_text,
     transcript_to_text,
     transcript_to_words_tsv,
@@ -84,9 +87,43 @@ def test_words_tsv_leaves_speaker_empty_before_assignment() -> None:
 
 def test_export_folder_name_is_safe_and_unique(tmp_path: Path) -> None:
     file = InputFile(path=tmp_path / "Interview 3 (final).m4a", content_hash="ab" * 32)
-    assert export_folder_name(file) == "Interview_3__final_-abababab"
+    assert export_folder_name(file, tmp_path) == "Interview_3__final_-abababab"
     hidden = InputFile(path=tmp_path / ".hidden.wav", content_hash="cd" * 32)
-    assert export_folder_name(hidden) == "hidden-cdcdcdcd"
+    assert export_folder_name(hidden, tmp_path) == "hidden-cdcdcdcd"
+
+
+def test_export_folder_name_mirrors_safe_subfolders(tmp_path: Path) -> None:
+    file = InputFile(path=tmp_path / "Site A" / ".2024" / "int 1.wav", content_hash="ab" * 32)
+    assert export_folder_name(file, tmp_path) == "Site_A/2024/int_1-abababab"
+
+
+@pytest.mark.parametrize("folder", ["../escape", "a//b", "/abs", "a/..", ".hidden/x", ""])
+def test_export_refuses_folders_outside_transcripts(tmp_path: Path, folder: str) -> None:
+    store = ArtifactStore(tmp_path / "out", tmp_path / "in", "job")
+    with pytest.raises(StoreError):
+        store.write_export(folder, "verbatim.txt", "text")
+    assert not (tmp_path / "out").exists()
+
+
+def test_export_keeps_the_input_folder_structure(stub_job: StubJob) -> None:
+    files = {
+        "top.wav": tone_wav_bytes(frequency=440),
+        "site_a/p01/interview.wav": tone_wav_bytes(frequency=550),
+        "site_b/interview.wav": tone_wav_bytes(frequency=660),
+    }
+    config = load_config(stub_job(files, stages={"end": "assign_speakers"}))
+    summary = run_job(config, "job", console=io.StringIO())
+    assert len(summary.done) == 3 and not summary.failed
+    store = ArtifactStore(config.data.output_dir, config.data.input_dir, "job")
+    exported = sorted(
+        str(p.parent.relative_to(store.transcripts_dir))
+        for p in store.transcripts_dir.rglob("verbatim.txt")
+    )
+    assert [name.rsplit("-", 1)[0] for name in exported] == [
+        "site_a/p01/interview",
+        "site_b/interview",
+        "top",
+    ]
 
 
 def _config(stub_job: StubJob, end: Stage) -> JobConfig:

@@ -462,7 +462,7 @@ def run_job(
                 "group_end", group=name, n_files=len(active), duration_s=round(group_wall[name], 3)
             )
         for run in runs:
-            export_transcripts(store, run.file, run.status, modes)
+            export_transcripts(store, run.file, run.status, modes, config.data.input_dir)
         for run in runs:
             if run.failed:
                 continue
@@ -513,19 +513,31 @@ def _audio_seconds(store: ArtifactStore, file_id: str) -> float:
     return store.read(file_id, Stage.LOAD_AUDIO, AudioInfo).duration_s
 
 
-def export_folder_name(file: InputFile) -> str:
-    """``<input file stem>-<first 8 characters of its file ID>``, safe as a folder name.
+def export_folder_name(file: InputFile, input_dir: Path) -> str:
+    """``<subfolders>/<input file stem>-<first 8 characters of its file ID>``.
 
-    Input file names contain no PHI (design doc), so they can name output folders.
+    Mirrors the file's subfolders under ``input_dir``, joined with ``/``; every part is
+    made safe as a folder name. Input file and folder names contain no PHI (design doc),
+    so they can name output folders.
     """
-    stem = re.sub(r"[^A-Za-z0-9_.-]", "_", file.path.stem).lstrip(".") or "file"
-    return f"{stem}-{file.file_id[:8]}"
+    relative = file.path.relative_to(input_dir)
+    parts = [_safe_part(part, "folder") for part in relative.parent.parts]
+    return "/".join([*parts, f"{_safe_part(relative.stem, 'file')}-{file.file_id[:8]}"])
+
+
+def _safe_part(name: str, fallback: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", name).lstrip(".") or fallback
 
 
 def export_transcripts(
-    store: ArtifactStore, file: InputFile, status: FileStatus, modes: tuple[TranscriptMode, ...]
+    store: ArtifactStore,
+    file: InputFile,
+    status: FileStatus,
+    modes: tuple[TranscriptMode, ...],
+    input_dir: Path,
 ) -> None:
-    """Copy a file's finished transcripts into ``transcripts/<folder>/``.
+    """Copy a file's finished transcripts into ``transcripts/<folder>/``, where
+    ``<folder>`` mirrors the file's place under ``input_dir`` (``export_folder_name``).
 
     For each mode: ``<mode>.txt`` (final, LLM-corrected if correction ran),
     ``<mode>.rule_based.txt`` and ``<mode>.words.tsv`` (final). Only for files whose
@@ -538,7 +550,7 @@ def export_transcripts(
     """
     if status.stages.get(Stage.ASSIGN_SPEAKERS) is not StageStatus.DONE:
         return
-    folder = export_folder_name(file)
+    folder = export_folder_name(file, input_dir)
     for mode in modes:
         sources = {
             f"{mode.value}.txt": (mode.value, ".txt"),

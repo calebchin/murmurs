@@ -112,6 +112,7 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 - PHI detection runs on verbatim whenever it is transcribed.
 - Lines the LLM sees are capped at about 250 tokens: longer speaker segments are split between words (`llm_lines`), so a chunk that keeps failing can always be split until every part is answered. Renderings still show whole segments.
 - `transcripts/<file>/` also gets, once detection is done: the original transcript (`verbatim.json`, which the redaction offsets point into), the redaction layer (`verbatim.redactions.json`, with each span's detectors and confidence), the annotated and clean renderings, and `deid_report.json`.
+- `transcripts/` mirrors the input folder tree: a file at `site_a/p01/interview.wav` under `input_dir` exports to `transcripts/site_a/p01/interview-<id>/` (each folder name made safe; the design doc assumes input file and folder names hold no PHI).
 
 **Measured** (same 3 podcasts, 3.5 hours of audio, `draft_model: nyralabs/CrisperWhisper2.0_turbo`)
 - Speculative decoding: on a 20-minute slice, verbatim took 48.9 s per audio hour against 60.0 s without it and 72.7 s for the dual pass. It is not bit-identical to the large model alone: 5 of 4,603 words differ (0.11%), and each mode is deterministic on its own.

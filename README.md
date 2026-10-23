@@ -62,7 +62,7 @@ uv run murmurs run -c my_job.yaml
 
 ## 5. Outputs
 
-Reviewer files are in `<output_dir>/<job>/transcripts/<audio name>-<id>/`:
+Reviewer files are in `<output_dir>/<job>/transcripts/<subfolders>/<audio name>-<id>/`, where `<subfolders>` mirrors where the audio file sits under `input_dir` (`site_a/p01/interview.wav` → `transcripts/site_a/p01/interview-5b82188d/`). Characters other than letters, digits, `_`, `.` and `-` become `_`. The ID suffix is the start of the audio's content hash:
 
 | File | Contents |
 | --- | --- |

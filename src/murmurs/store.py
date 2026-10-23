@@ -202,12 +202,18 @@ class ArtifactStore:
 
     @property
     def transcripts_dir(self) -> Path:
-        """Folder of readable transcript copies, one subfolder per input file."""
+        """Folder of readable transcript copies, one folder per input file, nested as
+        the inputs are."""
         return self.job_dir / "transcripts"
 
     def write_export(self, folder: str, name: str, text: str) -> Path:
-        """Atomically write ``transcripts/<folder>/<name>``."""
-        path = self.transcripts_dir / _checked_name(folder, "folder") / _checked_name(name, "name")
+        """Atomically write ``transcripts/<folder>/<name>``.
+
+        ``folder`` may be nested (parts joined with ``/``); each part must be a safe name,
+        so nothing is written outside ``transcripts/``.
+        """
+        parts = [_checked_name(part, "folder") for part in folder.split("/")]
+        path = self.transcripts_dir.joinpath(*parts) / _checked_name(name, "name")
         self._write_text(path, text)
         return path
 
