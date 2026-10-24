@@ -1,6 +1,8 @@
 """P3-04 (MVP): basic scoring and ``murmurs eval run``."""
 
 import json
+import re
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,7 @@ from murmurs.backends import M, registry
 from murmurs.backends.registry import BackendKind
 from murmurs.cli import app
 from murmurs.config import PROVISIONAL_ENTITY_TYPES
+from murmurs.errors import PipelineError
 from murmurs.evalset import load_dir
 from murmurs.evaluate import names_recall, overall, score_set
 from murmurs.models import DetectorSource, LLMUsage, RedactionSpan
@@ -138,8 +141,116 @@ def test_eval_run_prints_counts_only_and_writes_scores(tmp_path: Path, scripted:
         "scores.json",
         "tiny_ceca.annotated.txt",
         "tiny_leds.annotated.txt",
+        "tiny_ceca.detections.json",
+        "tiny_leds.detections.json",
     }
     assert "{{PERSON_1|Rosa Mendez}}" in (run_dir / "tiny_ceca.annotated.txt").read_text()
+    for name in ("tiny_ceca.detections.json", "tiny_leds.detections.json"):
+        saved = (run_dir / name).read_text()
+        for text in ("Rosa", "Millbrook", "555-0100", "Lakeview"):
+            assert text not in saved  # offsets and types only
+
+
+# --- resuming and rescoring -------------------------------------------------------------------
+
+
+class _FailOn(_FindAll):
+    """The scripted LLM, but its requests fail for one interview."""
+
+    def __init__(self, surfaces: dict[str, str], fail_on: str) -> None:
+        super().__init__(surfaces)
+        self.fail_on = fail_on
+
+    def generate(
+        self, prompt: str, response_model: type[M], file_id: str, system: str | None = None
+    ) -> M:
+        if file_id == self.fail_on:
+            raise PipelineError("LLM_REQUEST_FAILED", "detail with text")
+        return super().generate(prompt, response_model, file_id, system)
+
+
+@pytest.fixture
+def llm_calls(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """Registers the scripted LLM (finds every label) and records each LLM created.
+    Appending ``"fail:<set_id>"`` makes LLMs created afterwards fail on that interview."""
+    monkeypatch.setattr(registry, "_registry", dict(registry._registry))
+    surfaces = {lb.text: lb.entity_type for s in load_dir(FIXTURES, TYPES) for lb in s.labels}
+    calls: list[str] = []
+
+    def factory(_: object) -> _FindAll:
+        calls.append("created")
+        fail = [c for c in calls if c.startswith("fail:")]
+        return _FailOn(surfaces, fail[-1][5:]) if fail else _FindAll(surfaces)
+
+    registry.register(BackendKind.LLM, "scripted", factory)
+    yield calls
+
+
+def _run(evalset_dir: Path, config: Path, out: Path) -> Any:
+    args = ["eval", "run", str(evalset_dir), "-c", str(config), "--out", str(out)]
+    return CliRunner().invoke(app, args)
+
+
+def test_a_rerun_skips_detected_interviews_and_starts_no_models(
+    tmp_path: Path, llm_calls: list[str]
+) -> None:
+    config, out = _config(tmp_path), tmp_path / "results"
+    first = _run(FIXTURES, config, out)
+    assert first.exit_code == 0, first.output
+    assert "already detected: 0  to detect: 2" in first.stdout
+    assert llm_calls == ["created"]
+
+    second = _run(FIXTURES, config, out)
+    assert second.exit_code == 0, second.output
+    assert "already detected: 2  to detect: 0" in second.stdout
+    assert llm_calls == ["created"]  # no LLM server for a run with nothing to detect
+    assert "names recall: 2/2 (100.0%)" in second.stdout
+    assert json.loads((out / "scores.json").read_text())["names_recall"]["found"] == 2
+
+
+def test_a_stopped_run_keeps_finished_interviews_and_resumes(
+    tmp_path: Path, llm_calls: list[str]
+) -> None:
+    config, out = _config(tmp_path), tmp_path / "results"
+    llm_calls.append("fail:tiny_leds")
+    stopped = _run(FIXTURES, config, out)
+    assert stopped.exit_code == 2
+    assert "evaluation stopped (LLM_REQUEST_FAILED)" in stopped.stderr
+    assert f"1 of 2 interviews detected in this run; rerun with --out {out}" in stopped.stderr
+    assert "detail with text" not in stopped.output
+    assert (out / "tiny_ceca.detections.json").exists()
+    assert not (out / "tiny_leds.detections.json").exists()
+    assert not (out / "scores.json").exists()
+
+    llm_calls.clear()
+    resumed = _run(FIXTURES, config, out)
+    assert resumed.exit_code == 0, resumed.output
+    assert "already detected: 1  to detect: 1" in resumed.stdout
+    assert "names recall: 2/2 (100.0%)" in resumed.stdout
+
+
+def test_changed_settings_detect_again(tmp_path: Path, llm_calls: list[str]) -> None:
+    out = tmp_path / "results"
+    assert _run(FIXTURES, _config(tmp_path), out).exit_code == 0
+    changed = tmp_path / "changed"
+    changed.mkdir()
+    config = _config(changed, llm_server={"reasoning_effort": "low"})
+    result = _run(FIXTURES, config, out)
+    assert result.exit_code == 0, result.output
+    assert "already detected: 0  to detect: 2" in result.stdout
+
+
+def test_changed_labels_rescore_without_detecting(tmp_path: Path, llm_calls: list[str]) -> None:
+    evalset_dir, out, config = tmp_path / "set", tmp_path / "results", _config(tmp_path)
+    shutil.copytree(FIXTURES, evalset_dir)
+    assert _run(evalset_dir, config, out).exit_code == 0
+
+    ceca = evalset_dir / "tiny_ceca.md"
+    ceca.write_text(re.sub(r"\{\{PERSON\|([^}|]+)\}\}", r"\1", ceca.read_text()))  # unlabel
+    result = _run(evalset_dir, config, out)
+    assert result.exit_code == 0, result.output
+    assert "already detected: 2  to detect: 0" in result.stdout and llm_calls == ["created"]
+    assert "names recall: 1/1 (100.0%)" in result.stdout
 
 
 def test_eval_run_exits_2_when_models_are_not_set_up(

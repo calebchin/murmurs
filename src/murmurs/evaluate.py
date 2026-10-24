@@ -6,16 +6,28 @@ spans of a type that overlap a label of that type. Types with no labels in a set
 example the flag-only attribute types) are reported as spans only, without precision.
 
 Scores hold counts and label IDs only, never text.
+
+A run saves each interview's detections as it goes (``SavedDetections``), so a long run
+can resume, and scores are always computed from the saved detections against the
+current labels: re-importing a set with a changed tag mapping rescores it without
+detecting again.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from murmurs.models import GroundTruthSet, RedactionSpan
+from murmurs.models import GroundTruthSet, RedactionLayer, RedactionSpan
+
+DETECTIONS_SUFFIX = ".detections.json"
+"""Suffix of an interview's saved detections in a run folder."""
 
 NAME_TYPES = ("PERSON",)
 """Entity types whose recall is the phase goal's "names recall" (100% target)."""
@@ -136,3 +148,50 @@ def format_type_line(name: str, score: TypeScore) -> str:
 def label_breakdown(scores: Sequence[SetScore]) -> Counter[str]:
     """Missed label counts per set, for a one-line summary."""
     return Counter({s.set_id: len(s.missed) for s in scores})
+
+
+# --- saved detections (resume and rescoring) ---------------------------------------------
+
+
+class SavedDetections(BaseModel):
+    """One interview's detected spans in a run folder, with what they were computed from.
+
+    Spans hold offsets, types and tags only, never text.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    transcript_sha256: str
+    """Hash of the transcript detection ran on; a different text means detect again."""
+    settings_sha256: str
+    """Hash of the detection settings (``settings_digest``)."""
+    seconds: float
+    layer: RedactionLayer
+
+
+def transcript_digest(evalset: GroundTruthSet) -> str:
+    """Hash of an interview's transcript (not its labels, which only affect scoring)."""
+    return hashlib.sha256(evalset.transcript.model_dump_json().encode()).hexdigest()
+
+
+def settings_digest(settings: dict[str, Any]) -> str:
+    """Hash of the settings that affect detection output (the ``detect_phi`` stage config)."""
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
+
+
+def detections_path(run_dir: Path, set_id: str) -> Path:
+    """Where an interview's saved detections live in a run folder."""
+    return run_dir / f"{set_id}{DETECTIONS_SUFFIX}"
+
+
+def load_detections(path: Path, transcript_sha: str, settings_sha: str) -> SavedDetections | None:
+    """Saved detections that match this transcript and these settings, or None (missing,
+    unreadable or stale: the interview is detected again)."""
+    try:
+        saved = SavedDetections.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, ValidationError):
+        return None
+    if saved.transcript_sha256 != transcript_sha or saved.settings_sha256 != settings_sha:
+        return None
+    return saved
