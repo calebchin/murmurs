@@ -156,7 +156,8 @@ def test_tags_then_import_builds_a_valid_evaluation_set(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["eval", "tags", str(raw), str(deid), str(mapping)])
     assert result.exit_code == 0, result.output
-    assert "pairs=2  tags=7" in result.stdout and "still blank=7" in result.stdout
+    assert "pairs=2  turns=8  tags=7" in result.stdout and "still blank=7" in result.stdout
+    assert "warning" not in result.output
     assert set(load_mapping(mapping)) == {
         "LOCATION", "FIRST NAME", "LAST NAME", "NAME OF BROTHER", "SCHOOL", "AGE", "NAME",
     }  # fmt: skip
@@ -206,6 +207,30 @@ def test_tags_then_import_builds_a_valid_evaluation_set(tmp_path: Path) -> None:
         assert text not in (out / "import_report.json").read_text()
 
 
+def test_speaker_labels_on_their_own_line_with_text_below() -> None:
+    source = "SPEAKER_1:\nWhere did you\ngrow up?\n\nSPEAKER_2:\nIn Millbrook.\n\nAround there.\n"
+    turns, skipped = parse_turns(source)
+    assert skipped == 0
+    assert turns == [Turn(1, "Where did you grow up?"), Turn(2, "In Millbrook. Around there.")]
+    deid, _ = parse_turns(source.replace("Millbrook", "[CITY]"))
+    assert _surfaces(turns, deid) == [("Millbrook", "CITY")]
+
+
+def test_tags_warns_about_pairs_without_turns(tmp_path: Path) -> None:
+    raw, deid = tmp_path / "raw", tmp_path / "deid"
+    raw.mkdir(), deid.mkdir()
+    for folder in (raw, deid):
+        (folder / "a_CECA.txt").write_text("SPEAKER_1:\nhello there\n")
+        (folder / "b_LEDS.txt").write_text("Interviewer - hello there\n")
+    result = CliRunner().invoke(
+        app, ["eval", "tags", str(raw), str(deid), str(tmp_path / "t.yaml")]
+    )
+    assert result.exit_code == 0, result.output
+    assert "pairs=2  turns=1" in result.stdout
+    assert "warning: 1 pairs have a copy with no SPEAKER_N: turns: b_LEDS.txt" in result.stderr
+    assert "hello" not in result.output
+
+
 def test_tags_holding_text_never_reach_the_console(tmp_path: Path) -> None:
     raw, deid = tmp_path / "raw", tmp_path / "deid"
     raw.mkdir(), deid.mkdir()
@@ -242,3 +267,64 @@ def test_mapping_to_an_unknown_type_is_refused(tmp_path: Path) -> None:
         app, ["eval", "import", str(raw), str(deid), str(tmp_path / "o"), "-t", str(mapping)]
     )
     assert result.exit_code == 2 and "unknown entity types: PET" in result.stderr
+
+
+# --- limiting the import to a list of finished transcripts -------------------------------
+
+
+def _three_pairs(tmp_path: Path) -> tuple[Path, Path]:
+    raw, deid = tmp_path / "raw", tmp_path / "deid"
+    raw.mkdir(), deid.mkdir()
+    for name in ("p01_CECA.txt", "p02_LEDS.txt", "p03_CECA.txt"):
+        (raw / name).write_text("SPEAKER_1:\nI lived in Millbrook.\n")
+    (deid / "p01_CECA.txt").write_text("SPEAKER_1:\nI lived in [CITY].\n")
+    (deid / "p02_LEDS.txt").write_text("SPEAKER_1:\nI lived in [TOWN].\n")
+    (deid / "p03_CECA.txt").write_text("SPEAKER_1:\nI lived in Millbrook.\n")  # not reviewed
+    return raw, deid
+
+
+def test_file_list_matches_names_loosely_and_skips_blank_cells(tmp_path: Path) -> None:
+    listing = tmp_path / "done.csv"
+    listing.write_text("﻿Annotated\n P01_ceca.txt \np02_LEDS\n\n", encoding="utf-8")
+    from murmurs.evalimport import load_file_list, select_pairs
+
+    names = load_file_list(listing, "Annotated")
+    assert names == {"p01_ceca", "p02_leds"}
+    raw, deid = _three_pairs(tmp_path)
+    selected, not_found = select_pairs(pair_files(raw, deid), names | {"p09_ceca"})
+    assert [str(p.relative) for p in selected.pairs] == ["p01_CECA.txt", "p02_LEDS.txt"]
+    assert not_found == ["p09_ceca"]
+
+
+def test_file_list_without_the_column_is_refused(tmp_path: Path) -> None:
+    listing = tmp_path / "done.csv"
+    listing.write_text("Done\np01_CECA\n")
+    from murmurs.evalimport import load_file_list
+
+    with pytest.raises(EvalImportError, match="no column named 'Annotated'"):
+        load_file_list(listing, "Annotated")
+
+
+def test_only_limits_tags_and_import_to_listed_pairs(tmp_path: Path) -> None:
+    raw, deid = _three_pairs(tmp_path)
+    listing = tmp_path / "done.csv"
+    listing.write_text("Annotated\np01_CECA.txt\nP02_LEDS\np09_CECA\n")
+    mapping, out = tmp_path / "tags.yaml", tmp_path / "evalset"
+    runner = CliRunner()
+    only = ["--only", str(listing)]
+
+    result = runner.invoke(app, ["eval", "tags", str(raw), str(deid), str(mapping), *only])
+    assert result.exit_code == 0, result.output
+    assert "file list: 2 of 3 pairs selected" in result.stdout
+    assert "warning: 1 listed names match no pair: p09_ceca" in result.stderr
+    assert "pairs=2" in result.stdout and "tags=2" in result.stdout
+
+    mapping.write_text("CITY: LOCATION\nTOWN: LOCATION\n")
+    args = ["eval", "import", str(raw), str(deid), str(out), "-t", str(mapping), *only]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "imported 2/2 pairs, labels=2" in result.stdout
+    assert sorted(p.name for p in out.glob("*.md")) == ["p01_CECA.md", "p02_LEDS.md"]
+    report = json.loads((out / "import_report.json").read_text())
+    assert report["not_found"] == ["p09_ceca"]
+    assert "Millbrook" not in result.output

@@ -26,8 +26,10 @@ from murmurs.evalimport import (
     check_mapping,
     collect_tags,
     import_pairs,
+    load_file_list,
     load_mapping,
     pair_files,
+    select_pairs,
     write_mapping,
 )
 from murmurs.evalset import EvalSetError, label_counts, load_dir
@@ -450,12 +452,28 @@ DeidDirArgument = Annotated[
 ]
 
 
+OnlyOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--only",
+        help="CSV listing the transcripts to use (e.g. those a reviewer finished); "
+        "names match with or without .txt, ignoring case.",
+        show_default=False,
+    ),
+]
+ColumnOption = Annotated[
+    str, typer.Option("--column", help="CSV column holding the file names for --only.")
+]
+
+
 @eval_app.command("tags")
 def eval_tags(
     raw_dir: RawDirArgument,
     deid_dir: DeidDirArgument,
     mapping: Annotated[Path, typer.Argument(help="Tag mapping file to create or update (YAML).")],
     config: OptionalConfigOption = None,
+    only: OnlyOption = None,
+    column: ColumnOption = "Annotated",
 ) -> None:
     """Find the redaction tags reviewers used and add them, blank, to a mapping file.
 
@@ -464,27 +482,50 @@ def eval_tags(
     """
     types = _entity_type_names(config)
     try:
-        pairing = _pair_files_checked(raw_dir, deid_dir, mapping)
+        pairing, _ = _pair_files_checked(raw_dir, deid_dir, mapping, only, column)
         existing = load_mapping(mapping) if mapping.exists() else {}
-        tags = collect_tags(pairing)
-        new = write_mapping(mapping, tags, existing, types)
+        scan = collect_tags(pairing)
+        new = write_mapping(mapping, scan.tags, existing, types)
     except EvalImportError as exc:
         _fail_setup(str(exc))
+    tags = scan.tags
     blank = sum(1 for key in set(tags) | set(existing) if not existing.get(key))
     typer.echo(
-        f"pairs={len(pairing.pairs)}  tags={len(tags)}  occurrences={sum(tags.values())}"
-        f"  new={new}  still blank={blank}"
+        f"pairs={len(pairing.pairs)}  turns={scan.turns}  tags={len(tags)}"
+        f"  occurrences={sum(tags.values())}  new={new}  still blank={blank}"
     )
+    if scan.no_turns:
+        names = ", ".join(str(p) for p in scan.no_turns[:10])
+        more = f" and {len(scan.no_turns) - 10} more" if len(scan.no_turns) > 10 else ""
+        typer.echo(
+            f"warning: {len(scan.no_turns)} pairs have a copy with no SPEAKER_N: turns: "
+            f"{names}{more}",
+            err=True,
+        )
     typer.echo(f"mapping: {mapping}")
 
 
-def _pair_files_checked(raw_dir: Path, deid_dir: Path, output: Path) -> Pairing:
-    """Pair the transcripts, refusing an output path inside either input folder."""
+def _pair_files_checked(
+    raw_dir: Path, deid_dir: Path, output: Path, only: Path | None, column: str
+) -> tuple[Pairing, list[str]]:
+    """Pair the transcripts, refusing an output path inside either input folder, and keep
+    only those listed in ``only`` when given. Returns the pairing and the listed names
+    that match no pair (warned about on stderr)."""
     target = output.expanduser().absolute()
     for folder in (raw_dir, deid_dir):
         if target.is_relative_to(folder.expanduser().absolute()):
             raise EvalImportError("outputs must be outside the input folders")
-    return pair_files(raw_dir, deid_dir)
+    pairing = pair_files(raw_dir, deid_dir)
+    if only is None:
+        return pairing, []
+    total = len(pairing.pairs)
+    pairing, not_found = select_pairs(pairing, load_file_list(only, column))
+    typer.echo(f"file list: {len(pairing.pairs)} of {total} pairs selected")
+    if not_found:
+        names = ", ".join(not_found[:10])
+        more = f" and {len(not_found) - 10} more" if len(not_found) > 10 else ""
+        typer.echo(f"warning: {len(not_found)} listed names match no pair: {names}{more}", err=True)
+    return pairing, not_found
 
 
 @eval_app.command("import")
@@ -501,6 +542,8 @@ def eval_import(
         ),
     ],
     config: OptionalConfigOption = None,
+    only: OnlyOption = None,
+    column: ColumnOption = "Annotated",
 ) -> None:
     """Turn raw and human-deidentified transcripts into an evaluation set.
 
@@ -510,10 +553,10 @@ def eval_import(
     """
     types = _entity_type_names(config)
     try:
-        pairing = _pair_files_checked(raw_dir, deid_dir, out_dir)
+        pairing, not_found = _pair_files_checked(raw_dir, deid_dir, out_dir, only, column)
         tag_map = load_mapping(mapping)
         check_mapping(tag_map, types)
-        report = import_pairs(pairing, tag_map, out_dir, [raw_dir, deid_dir])
+        report = import_pairs(pairing, tag_map, out_dir, [raw_dir, deid_dir], not_found)
     except EvalImportError as exc:
         _fail_setup(str(exc))
     totals: Counter[str] = Counter()

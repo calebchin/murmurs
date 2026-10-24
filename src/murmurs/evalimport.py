@@ -1,12 +1,14 @@
 """Import human-deidentified transcripts as an evaluation set.
 
 The input is two folders of ``.txt`` transcripts, the raw copies and the copies a human
-deidentified, paired by their path relative to each folder. Each turn is a line starting
-``Speaker N:``; a line without that prefix continues the turn before it, and lines before
-the first turn are skipped. The deidentified copy replaces PHI with bracketed tags such as
-``[NAME]`` or ``[PARTICIPANT NAME]``, worded differently by different reviewers. A tag
-mapping (YAML, tag -> entity type or ``IGNORE``) gives each tag its entity type; tags
-match ignoring case, spacing and brackets.
+deidentified, paired by their path relative to each folder; a CSV column of file names
+can limit the import to the transcripts a reviewer finished (``select_pairs``). Each turn
+starts with a line such as ``SPEAKER_1:`` or ``Speaker 1:``; a line without that prefix
+continues the turn before it, and lines before the first turn are skipped. The
+deidentified copy replaces PHI with bracketed tags such as ``[NAME]`` or
+``[PARTICIPANT NAME]``, worded differently by different reviewers. A tag mapping (YAML,
+tag -> entity type or ``IGNORE``) gives each tag its entity type; tags match ignoring
+case, spacing and brackets.
 
 Each pair is aligned token by token. Where tags replace raw tokens, the raw tokens become
 a ground-truth label of the tag's type. Bracketed notes that both copies share, such as
@@ -22,6 +24,7 @@ is written only to the mapping file.
 
 from __future__ import annotations
 
+import csv
 import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -38,7 +41,9 @@ from murmurs.store import atomic_writer
 IGNORE = "IGNORE"
 """Mapping value for tags that do not mark PHI (they produce no label)."""
 
-_SPEAKER_LINE = re.compile(r"^\s*speaker\s*(\d+)\s*:\s?(.*)$", re.IGNORECASE)
+_SPEAKER_LINE = re.compile(r"^\s*speaker[\s_]*(\d+)\s*:\s?(.*)$", re.IGNORECASE)
+"""``SPEAKER_1:``, ``Speaker 0:`` or ``speaker2:``, with the turn's text after it on the
+same line or on the lines below."""
 _TOKEN = re.compile(r"\[[^\[\]\n]*\]|\w+|[^\w\s]")
 _TAG = re.compile(r"\[[^\[\]\n]*\]")
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]")
@@ -307,6 +312,47 @@ def pair_files(raw_dir: Path, deid_dir: Path) -> Pairing:
     return Pairing(pairs, sorted(raw.keys() - deid.keys()), sorted(deid.keys() - raw.keys()))
 
 
+def file_key(name: str) -> str:
+    """How a file name is matched against a list: spaces trimmed, a ``.txt`` extension
+    dropped, case ignored."""
+    name = name.strip()
+    return (name[:-4] if name.lower().endswith(".txt") else name).casefold()
+
+
+def load_file_list(path: Path, column: str) -> set[str]:
+    """File-name keys (see ``file_key``) from one column of a CSV; empty cells skipped."""
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            columns = reader.fieldnames or []
+            if column not in columns:
+                raise EvalImportError(
+                    f"{path} has no column named {column!r} (columns: {', '.join(columns)})"
+                )
+            names = {file_key(row[column]) for row in reader if (row[column] or "").strip()}
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        raise EvalImportError(f"cannot read file list {path} ({type(exc).__name__})") from None
+    if not names:
+        raise EvalImportError(f"{path} lists no file names in column {column!r}")
+    return names
+
+
+def select_pairs(pairing: Pairing, names: set[str]) -> tuple[Pairing, list[str]]:
+    """Only the pairs (and unpaired files) whose file name is in ``names``, and the listed
+    names that match no pair, sorted."""
+
+    def listed(path: Path) -> bool:
+        return file_key(path.name) in names
+
+    selected = Pairing(
+        pairs=[pair for pair in pairing.pairs if listed(pair.relative)],
+        raw_only=[path for path in pairing.raw_only if listed(path)],
+        deid_only=[path for path in pairing.deid_only if listed(path)],
+    )
+    paired = {file_key(pair.relative.name) for pair in selected.pairs}
+    return selected, sorted(names - paired)
+
+
 def _read(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8-sig")
@@ -347,14 +393,32 @@ class ImportReport(BaseModel):
     files: list[FileReport]
     raw_only: list[str]
     deid_only: list[str]
+    not_found: list[str] = Field(default_factory=list)
+    """Names in the file list (``--only``) that match no pair."""
 
 
-def collect_tags(pairing: Pairing) -> Counter[str]:
+@dataclass
+class TagScan:
+    """Tags found across the pairs, and pairs where a copy has no turns (a sign the line
+    format is not ``SPEAKER_N:``)."""
+
+    tags: Counter[str] = field(default_factory=Counter)
+    turns: int = 0
+    """Turns in the raw copies."""
+    no_turns: list[Path] = field(default_factory=list)
+
+
+def collect_tags(pairing: Pairing) -> TagScan:
     """Every normalized tag across the pairs, with its occurrences."""
-    tags: Counter[str] = Counter()
+    scan = TagScan()
     for pair in pairing.pairs:
-        tags.update(align_pair(pair)[2].tags)
-    return tags
+        raw, _ = parse_turns(_read(pair.raw))
+        deid, _ = parse_turns(_read(pair.deid))
+        scan.turns += len(raw)
+        if not raw or not deid:
+            scan.no_turns.append(pair.relative)
+        scan.tags.update(align(raw, deid).tags)
+    return scan
 
 
 def _render(
@@ -395,6 +459,7 @@ def import_pairs(
     mapping: dict[str, str | None],
     out_dir: Path,
     inputs: Sequence[Path],
+    not_found: Sequence[str] = (),
 ) -> ImportReport:
     """Convert every pair to an evaluation interview in ``out_dir`` and write
     ``import_report.json`` there.
@@ -455,6 +520,7 @@ def import_pairs(
         files=reports,
         raw_only=[str(p) for p in pairing.raw_only],
         deid_only=[str(p) for p in pairing.deid_only],
+        not_found=list(not_found),
     )
     with atomic_writer(target / "import_report.json") as f:
         f.write(full.model_dump_json(indent=2))
