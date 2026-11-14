@@ -74,3 +74,33 @@ Reviewer files are in `<output_dir>/<job>/transcripts/<subfolders>/<audio name>-
 | `deid_report.json` | Counts only |
 
 Logs, timing (`metrics.json`) and the run manifest are in `<output_dir>/<job>/`.
+
+## 6. Evaluate PHI detection
+
+All evaluation output is counts and label IDs only, never transcript text.
+
+**Synthetic set** (fictional PHI, committed under `eval/synthetic/`):
+
+```bash
+uv run murmurs eval check eval/synthetic                     # validate; per-type label counts
+uv run murmurs eval run eval/synthetic -c my_job.yaml        # detect, then recall and precision per type
+uv run murmurs eval run eval/synthetic -c my_job.yaml --out <folder>   # resume or rescore an earlier run
+```
+
+`eval run` writes `scores.json`, plus each interview's detections and annotated rendering, to `<output_dir>/eval/<timestamp>/`. You can also pick a folder with `--out`. Rerun with the same `--out` to resume: interviews already detected with the same settings are skipped, and every interview is scored again.
+
+**Human-deidentified transcripts.** Pairs of raw and hand-deidentified real transcripts can be turned into an evaluation set. These hold real interview text: keep every folder below **outside this repository**, and never commit them.
+
+1. Put the raw `.txt` transcripts in one folder and the deidentified copies in another, at the same relative paths. Each turn starts with `Speaker 1:` or `SPEAKER_1:`. File names must contain `CECA` or `LEDS`.
+2. Collect the reviewers' tags (`[NAME]`, `[SCHOOL]`, ...) into a mapping file:
+   ```bash
+   uv run murmurs eval tags <raw> <deid> tags.yaml -c my_job.yaml
+   ```
+3. Edit `tags.yaml`: give each tag an entity type from `deid.entity_types`, or `IGNORE`.
+4. Import, then check and score as above:
+   ```bash
+   uv run murmurs eval import <raw> <deid> <new folder> -t tags.yaml -c my_job.yaml
+   uv run murmurs eval run <new folder> -c my_job.yaml
+   ```
+
+To use only the transcripts a reviewer has finished, add `--only done.csv` to both `eval tags` and `eval import`. The CSV's `Annotated` column (or the one you pick with `--column`) lists the file names. After changing the mapping, re-import into a new folder; `eval run --out` with the earlier results folder rescores without detecting again.
