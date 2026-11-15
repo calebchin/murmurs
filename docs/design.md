@@ -1,6 +1,6 @@
 # Murmurs — Audio Interview to Cleaned Transcript Design Doc
 
-Last updated: Oct 21, 2026
+Last updated: Nov 14, 2026
 
 ## Summary and motivation
 
@@ -102,7 +102,7 @@ The runner works in stage groups, finishing each group for every file before sta
 | 3 | Diarization | Waveform | Speaker turns (JSON) | NVIDIA Nemotron-3-Diarization (via `transformers`) on the full recording; the model chunks long audio itself |
 | 4 | Transcription | Waveform | Verbatim and intended transcripts with word-level timestamps | CrisperWhisper 2.0 `transcribe_dual`, which handles long audio itself with no stitching needed |
 | 5 | Speaker assignment | Word timestamps + speaker turns | Full speaker-labeled transcript | Move speaker turns `turn_offset_s` earlier, then assign each word to the speaker turn it overlaps most; a word in a gap goes to the nearest turn within `speaker_gap_tolerance_s`, else `UNKNOWN`; optional LLM pass to fix diarization mistakes |
-| 6 | PHI detection | Full transcript | Annotated transcript for review + clean version (PHI above a set threshold redacted) | NER model + LLM ensemble |
+| 6 | PHI detection | Full transcript (verbatim when transcribed, else intended) | Annotated transcript for review + clean version (PHI above a set threshold redacted) | NER model + LLM ensemble |
 | 7 | Human review | Annotated transcript | Clean, reviewed transcript | Review UI |
 
 Regex-based detection is not used, since the expected identifiers do not follow common patterns.
@@ -237,6 +237,7 @@ class TranscriptionConfig(BaseModel):
     language: str = "en"
     modes: list[str] = ["verbatim", "intended"]
     word_timestamps: bool = True
+    draft_model: str | None = None       # smaller CrisperWhisper 2.0 model for speculative decoding; None = off
 
 
 class EntityType(BaseModel):
@@ -251,6 +252,9 @@ class LLMServerConfig(BaseModel):          # the local vLLM server (D22)
     gpu_memory_utilization: float = Field(0.85, gt=0, le=1)
     max_model_len: int = Field(32768, ge=1024)
     startup_timeout_s: float = Field(900, gt=0)
+    max_output_tokens: int = Field(8192, ge=256)    # cap per response; a cut-off chunk is split, not retried
+    max_concurrency: int = Field(64, ge=1, le=64)   # requests in flight at once
+    reasoning_effort: str = "medium"     # "low" | "medium" | "high"; the only server setting in the LLM stages' config hashes
 
 
 class DeidConfig(BaseModel):
@@ -288,6 +292,7 @@ Deidentification is evaluated on a synthetic interview set with planted PHI.
 
 - **Transcription quality:** evaluated by human review for now. A sample run transcribes a handful of files from the full dataset so reviewers can check quality before the full job runs.
 - **Evaluation set:** synthetic interviews of 15 minutes to 1 hour, in two styles: childhood experiences (CECA interview) and life events and difficulties within the last year (LEDS interview), with planted PHI.
+- **Human-deidentified transcripts:** `murmurs eval import` turns pairs of raw and hand-deidentified real transcripts into evaluation interviews, for analysis on real speech. They are never committed, and the phase goal is still measured on the synthetic set.
 - **Regression suite:** rerun whenever models or prompts change, reporting per-entity precision and recall.
 - **Feedback loop:** approved, rejected and manually added redactions from review are stored as labeled data.
 - **Tests:** unit and integration tests for each pipeline stage.

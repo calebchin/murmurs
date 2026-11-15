@@ -122,10 +122,32 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 
 ---
 
+## P3-07: Import human-deidentified transcripts
+
+**Goal:** score detection against transcripts reviewers deidentified by hand, by turning each raw/deidentified pair into an evaluation interview for `murmurs eval run` (D25).
+
+**Scope** (`murmurs.evalimport`, CLI in `murmurs.cli`)
+- Input: two folders of `.txt` transcripts, raw and human-deidentified, paired by path relative to each folder. A turn starts with `SPEAKER_1:`, `Speaker 1:` or `speaker1:`; a line without that prefix continues the turn before it, and lines before the first turn are skipped. Reviewers replace PHI with bracketed tags (`[NAME]`, `[PARTICIPANT NAME]`, ...), worded differently by different reviewers.
+- `murmurs eval tags RAW DEID MAPPING [-c job.yaml]` finds every tag (matched ignoring case, spacing and brackets) and adds it, blank, to a YAML mapping file; existing entries are kept. The user maps each tag to an entity type from `deid.entity_types` (the provisional set without `-c`) or `IGNORE`.
+- `murmurs eval import RAW DEID OUT --tags MAPPING [-c job.yaml]` aligns each pair token by token; raw tokens a tag replaced become a label of the tag's type. Bracketed notes both copies share (`[inaudible]`) are ordinary text. One `*.md` interview per pair (`SPEAKER_NN` turns, the evaluation-set format) plus a counts-only `import_report.json`. The interview type comes from the file name, which must contain `CECA` or `LEDS`; other pairs, and pairs whose text the format cannot hold (`{{`, `}}`, or `{`, `}`, `|` inside a label), are skipped and reported. The import refuses an unmapped tag, a non-empty `OUT`, and an `OUT` inside either input folder.
+- `--only CSV [--column Annotated]` limits both commands to the transcripts listed in a CSV column (names match with or without `.txt`, ignoring case), for partly finished annotation runs; listed names that match no pair are warned about.
+- The evaluation-set parser (`murmurs.evalset`) also accepts `SPEAKER_NN:` turns.
+- `murmurs eval run --out DIR` saves each interview's detections (`SavedDetections`: offsets, types, tags, plus hashes of the transcript and the `detect_phi` settings) as it goes. Rerunning with the same `--out` skips interviews already detected from the same text with the same settings and rescores every interview against its current labels, so re-importing with a changed mapping rescores without detecting again. A progress bar shows on a terminal; detection errors exit 2 and Ctrl-C exits 130, both naming the folder to resume from.
+
+**Acceptance criteria** (in `tests/test_evalimport.py`, `tests/test_evaluate.py`)
+- Tags are found and normalized; alignment turns replaced raw text into labels and never crosses a turn; shared bracketed notes stay text.
+- Unmapped tags, a non-empty output folder and an output inside an input folder stop the import before anything is written.
+- `--only` selects pairs and reports unmatched names.
+- Imported interviews load with `murmurs eval check`.
+- A rerun skips interviews already detected and starts no models; a stopped run resumes; changed settings detect again; changed labels rescore without detecting.
+- Output, reports and the mapping step's console output hold counts and file names only; tag wording reaches only the mapping file.
+
+---
+
 ## Deferred after the MVP
 
-- Confidence beyond detector agreement (design open question).
-- LLM metadata carried across chunks for tag consistency (the MVP indexes tags after detection instead).
-- Deidentifying the verbatim transcript.
-- The regression suite with per-entity precision and recall gates, and recall tuning towards the phase goal.
-- The full synthetic evaluation set (D8).
+- Confidence beyond detector agreement (design open question; stays deferred).
+- ~~LLM metadata carried across chunks for tag consistency~~: dropped (Nov 14, 2026). Tags are indexed after detection, so every occurrence already gets the same tag, and carrying metadata from chunk to chunk would force chunks to run one at a time, undoing P3-05.
+- ~~Deidentifying the verbatim transcript~~: done in P3-06.
+- The full synthetic evaluation set (D8): next, as P3-08.
+- The regression suite with per-entity recall gates (worst of N runs, reported, not blocking): P3-09. Recall tuning towards the phase goal follows a baseline run on the full set.
