@@ -4,18 +4,18 @@ import io
 
 from conftest import SENTINEL, StubJob
 
-from murmurs.backends.stubs import (
+from otus.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
     StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.config import Stage, load_config
-from murmurs.logging import ProgressBar
-from murmurs.models import StageStatus
-from murmurs.runner import run_job
-from murmurs.stages import Backends
+from otus.config import Stage, load_config
+from otus.logging import ProgressBar
+from otus.models import StageStatus
+from otus.runner import run_job
+from otus.stages import Backends
 
 CLEAR = "\r\x1b[2K"
 

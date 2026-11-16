@@ -12,7 +12,7 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 
 **Goal:** a `NERDetector` for `OpenMed/privacy-filter-nemotron-v2` that returns character spans over a transcript's canonical text.
 
-**Scope** (in `murmurs.backends`)
+**Scope** (in `otus.backends`)
 - First, a spike, reported before building on it: load offline (`local_files_only`); the label scheme (BIO or BIOES) and how character offsets come back; the maximum sequence length and the windowing an hour of text needs; speed, and GPU memory next to the vLLM server at `gpu_memory_utilization` 0.85.
 - The backend imports `transformers` in its factory, uses `resolve_device`, runs one forward pass per overlapping token window, and merges windows into character spans. The raw NER label is the span's `entity_type`; the mean token probability is its `confidence`; `sources` is `[ner]`. `close()` frees the GPU. Library errors become `PipelineError("NER_FAILED")`.
 - Registered under the model name, with a `WeightSpec` limited to the files inference needs.
@@ -25,8 +25,8 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 
 **Goal:** the LLM finds PHI the NER model cannot (organizations, schools, hospitals, facilities, nicknames, partial names), and both detectors' spans merge into one set.
 
-**Scope** (in `murmurs.stages`)
-- The canonical text is chunked by segment line with context lines (as in P2-07). The prompt (files under `murmurs/stages/prompts/`) lists `deid.entity_types` with their descriptions. The LLM returns `{entities: [{line, text, entity_type}]}`. Each entity's text must occur exactly in that line, and every occurrence becomes a span. Unknown types and text not found are rejected and counted.
+**Scope** (in `otus.stages`)
+- The canonical text is chunked by segment line with context lines (as in P2-07). The prompt (files under `otus/stages/prompts/`) lists `deid.entity_types` with their descriptions. The LLM returns `{entities: [{line, text, entity_type}]}`. Each entity's text must occur exactly in that line, and every occurrence becomes a span. Unknown types and text not found are rejected and counted.
 - NER spans are mapped through `EntityType.ner_labels` and `action`: `ignore` drops the span, `flag` marks it as a flagged edge case, `redact` keeps it.
 - Overlapping spans are merged (sources unioned). Confidence is simple agreement: both detectors give 1.0, NER alone gives its probability, the LLM alone gives 0.7.
 - Tags are indexed per entity type by normalized surface, in order of first appearance (`[PERSON_1]`), so every occurrence of a name gets the same tag.
@@ -55,12 +55,12 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 **Goal:** a first recall number on the MVP evaluation set, and proof the whole pipeline runs offline with a throughput measure.
 
 **Scope**
-- `murmurs eval run <dir> -c job.yaml` runs the P3-02 detection on each evaluation transcript and prints per-type recall and precision as counts, plus names recall (a label counts as found if a span of the same type overlaps it). Never prints text. Writes `scores.json`.
+- `otus eval run <dir> -c job.yaml` runs the P3-02 detection on each evaluation transcript and prints per-type recall and precision as counts, plus names recall (a label counts as found if a span of the same type overlaps it). Never prints text. Writes `scores.json`.
 - `metrics.json` gains a job summary: total audio seconds, wall time per stage group (including model loads), and the overall real-time factor.
 - An end-to-end job on the example audio through `detect_phi`, audited with strace for non-Unix connections, then rerun with the network disconnected (a human step).
 
 **Acceptance criteria**
-- `murmurs eval run` output contains counts only.
+- `otus eval run` output contains counts only.
 - `metrics.json` reports the real-time factor for a completed job.
 - The offline rerun produces the same outputs; strace shows Unix-socket connections only.
 
@@ -86,7 +86,7 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 - A truncated chunk is split until its parts succeed; every line is answered exactly once; a failed request stops the file.
 - The client never retries a truncated response, and its usage counts stay exact under concurrent use.
 - Changing `reasoning_effort` or a chunk size reruns the LLM stages; changing `max_concurrency` or `max_output_tokens` does not.
-- GPU: the podcast job and `murmurs eval run` are rerun to measure the speed-up, comparing `reasoning_effort` low and medium on the evaluation set.
+- GPU: the podcast job and `otus eval run` are rerun to measure the speed-up, comparing `reasoning_effort` low and medium on the evaluation set.
 
 **Measured** (RTX PRO 6000, 96 GB; 68-minute podcast, `reasoning_effort: medium`)
 - Output tokens per second rise with concurrent requests: 196 (1), 619 (8), 930 (32), 1,166 (64). The model reasons for 2,000 to 5,000 tokens per request whatever the chunk size.
@@ -108,7 +108,7 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 **Decisions (Oct 23, 2026):** transcribe verbatim only, with speculative decoding; skip LLM speaker correction for now (`diarization.llm_correction: false`; diarization and rule-based labels stay); deidentify the verbatim transcript (D9 changed); export the original transcript with the deidentification outputs.
 
 **Scope**
-- `transcription.draft_model` (config schema 5, default `null`): a smaller CrisperWhisper 2.0 model for speculative decoding. With it, each mode is decoded in its own speculative pass. `murmurs models download` downloads and converts it; it is part of the transcription config hash only when set.
+- `transcription.draft_model` (config schema 5, default `null`): a smaller CrisperWhisper 2.0 model for speculative decoding. With it, each mode is decoded in its own speculative pass. `otus models download` downloads and converts it; it is part of the transcription config hash only when set.
 - PHI detection runs on verbatim whenever it is transcribed.
 - Lines the LLM sees are capped at about 250 tokens: longer speaker segments are split between words (`llm_lines`), so a chunk that keeps failing can always be split until every part is answered. Renderings still show whole segments.
 - `transcripts/<file>/` also gets, once detection is done: the original transcript (`verbatim.json`, which the redaction offsets point into), the redaction layer (`verbatim.redactions.json`, with each span's detectors and confidence), the annotated and clean renderings, and `deid_report.json`.
@@ -124,21 +124,21 @@ Decisions this phase builds on are in `docs/tasks/phase2.md`: D6 and D22 (the vL
 
 ## P3-07: Import human-deidentified transcripts
 
-**Goal:** score detection against transcripts reviewers deidentified by hand, by turning each raw/deidentified pair into an evaluation interview for `murmurs eval run` (D25).
+**Goal:** score detection against transcripts reviewers deidentified by hand, by turning each raw/deidentified pair into an evaluation interview for `otus eval run` (D25).
 
-**Scope** (`murmurs.evalimport`, CLI in `murmurs.cli`)
+**Scope** (`otus.evalimport`, CLI in `otus.cli`)
 - Input: two folders of `.txt` transcripts, raw and human-deidentified, paired by path relative to each folder. A turn starts with `SPEAKER_1:`, `Speaker 1:` or `speaker1:`; a line without that prefix continues the turn before it, and lines before the first turn are skipped. Reviewers replace PHI with bracketed tags (`[NAME]`, `[PARTICIPANT NAME]`, ...), worded differently by different reviewers.
-- `murmurs eval tags RAW DEID MAPPING [-c job.yaml]` finds every tag (matched ignoring case, spacing and brackets) and adds it, blank, to a YAML mapping file; existing entries are kept. The user maps each tag to an entity type from `deid.entity_types` (the provisional set without `-c`) or `IGNORE`.
-- `murmurs eval import RAW DEID OUT --tags MAPPING [-c job.yaml]` aligns each pair token by token; raw tokens a tag replaced become a label of the tag's type. Bracketed notes both copies share (`[inaudible]`) are ordinary text. One `*.md` interview per pair (`SPEAKER_NN` turns, the evaluation-set format) plus a counts-only `import_report.json`. The interview type comes from the file name, which must contain `CECA` or `LEDS`; other pairs, and pairs whose text the format cannot hold (`{{`, `}}`, or `{`, `}`, `|` inside a label), are skipped and reported. The import refuses an unmapped tag, a non-empty `OUT`, and an `OUT` inside either input folder.
+- `otus eval tags RAW DEID MAPPING [-c job.yaml]` finds every tag (matched ignoring case, spacing and brackets) and adds it, blank, to a YAML mapping file; existing entries are kept. The user maps each tag to an entity type from `deid.entity_types` (the provisional set without `-c`) or `IGNORE`.
+- `otus eval import RAW DEID OUT --tags MAPPING [-c job.yaml]` aligns each pair token by token; raw tokens a tag replaced become a label of the tag's type. Bracketed notes both copies share (`[inaudible]`) are ordinary text. One `*.md` interview per pair (`SPEAKER_NN` turns, the evaluation-set format) plus a counts-only `import_report.json`. The interview type comes from the file name, which must contain `CECA` or `LEDS`; other pairs, and pairs whose text the format cannot hold (`{{`, `}}`, or `{`, `}`, `|` inside a label), are skipped and reported. The import refuses an unmapped tag, a non-empty `OUT`, and an `OUT` inside either input folder.
 - `--only CSV [--column Annotated]` limits both commands to the transcripts listed in a CSV column (names match with or without `.txt`, ignoring case), for partly finished annotation runs; listed names that match no pair are warned about.
-- The evaluation-set parser (`murmurs.evalset`) also accepts `SPEAKER_NN:` turns.
-- `murmurs eval run --out DIR` saves each interview's detections (`SavedDetections`: offsets, types, tags, plus hashes of the transcript and the `detect_phi` settings) as it goes. Rerunning with the same `--out` skips interviews already detected from the same text with the same settings and rescores every interview against its current labels, so re-importing with a changed mapping rescores without detecting again. A progress bar shows on a terminal; detection errors exit 2 and Ctrl-C exits 130, both naming the folder to resume from.
+- The evaluation-set parser (`otus.evalset`) also accepts `SPEAKER_NN:` turns.
+- `otus eval run --out DIR` saves each interview's detections (`SavedDetections`: offsets, types, tags, plus hashes of the transcript and the `detect_phi` settings) as it goes. Rerunning with the same `--out` skips interviews already detected from the same text with the same settings and rescores every interview against its current labels, so re-importing with a changed mapping rescores without detecting again. A progress bar shows on a terminal; detection errors exit 2 and Ctrl-C exits 130, both naming the folder to resume from.
 
 **Acceptance criteria** (in `tests/test_evalimport.py`, `tests/test_evaluate.py`)
 - Tags are found and normalized; alignment turns replaced raw text into labels and never crosses a turn; shared bracketed notes stay text.
 - Unmapped tags, a non-empty output folder and an output inside an input folder stop the import before anything is written.
 - `--only` selects pairs and reports unmatched names.
-- Imported interviews load with `murmurs eval check`.
+- Imported interviews load with `otus eval check`.
 - A rerun skips interviews already detected and starts no models; a stopped run resumes; changed settings detect again; changed labels rescore without detecting.
 - Output, reports and the mapping step's console output hold counts and file names only; tag wording reaches only the mapping file.
 

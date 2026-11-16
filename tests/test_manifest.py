@@ -11,15 +11,15 @@ from conftest import SENTINEL, StubJob
 from fixtures.audio import tone_wav_bytes
 from typer.testing import CliRunner
 
-from murmurs import __version__, manifest
-from murmurs.backends.stubs import StubTranscriber
-from murmurs.cli import app
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.manifest import code_version, dependency_versions, select_sample
-from murmurs.models import RunManifest, StageStatus
-from murmurs.runner import create_backends, run_job
-from murmurs.stages import Backends
-from murmurs.store import ArtifactStore
+from otus import __version__, manifest
+from otus.backends.stubs import StubTranscriber
+from otus.cli import app
+from otus.config import JobConfig, Stage, load_config
+from otus.manifest import code_version, dependency_versions, select_sample
+from otus.models import RunManifest, StageStatus
+from otus.runner import create_backends, run_job
+from otus.stages import Backends
+from otus.store import ArtifactStore
 
 TEN_FILES = {f"f{i}.wav": tone_wav_bytes(frequency=200 + 50 * i) for i in range(10)}
 
@@ -143,10 +143,10 @@ def test_code_version_reads_git_commit(tmp_path: Path) -> None:
 
 
 def test_dependency_versions_skip_missing_packages(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(manifest, "KEY_DEPENDENCIES", ("numpy", "murmurs-test-not-installed"))
+    monkeypatch.setattr(manifest, "KEY_DEPENDENCIES", ("numpy", "otus-test-not-installed"))
     versions = dependency_versions()
     assert "numpy" in versions
-    assert "murmurs-test-not-installed" not in versions
+    assert "otus-test-not-installed" not in versions
 
 
 def test_dependency_versions_record_the_ctranslate2_fork() -> None:

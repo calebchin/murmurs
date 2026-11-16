@@ -7,10 +7,10 @@ import pytest
 from conftest import StubJob
 from fixtures.audio import tone_wav_bytes
 
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.models import Segment, Transcript, TranscriptMode, Word
-from murmurs.runner import InputFile, export_folder_name, run_job
-from murmurs.store import (
+from otus.config import JobConfig, Stage, load_config
+from otus.models import Segment, Transcript, TranscriptMode, Word
+from otus.runner import InputFile, export_folder_name, run_job
+from otus.store import (
     WORDS_TSV_HEADER,
     ArtifactStore,
     StoreError,

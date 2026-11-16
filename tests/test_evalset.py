@@ -7,11 +7,11 @@ import pytest
 from conftest import SENTINEL
 from typer.testing import CliRunner
 
-from murmurs.cli import app
-from murmurs.config import PROVISIONAL_ENTITY_TYPES, load_config
-from murmurs.evalset import EvalSetError, label_counts, load_dir, parse_interview, validate
-from murmurs.models import GroundTruthLabel, InterviewType
-from murmurs.store import canonical_text
+from otus.cli import app
+from otus.config import PROVISIONAL_ENTITY_TYPES, load_config
+from otus.evalset import EvalSetError, label_counts, load_dir, parse_interview, validate
+from otus.models import GroundTruthLabel, InterviewType
+from otus.store import canonical_text
 
 FIXTURES = Path(__file__).parent / "fixtures" / "eval"
 MVP_SET = Path(__file__).parent.parent / "eval" / "synthetic"

@@ -3,8 +3,8 @@
 import pytest
 from conftest import StubJob
 
-from murmurs.backends import registry
-from murmurs.backends.openmed_ner import (
+from otus.backends import registry
+from otus.backends.openmed_ner import (
     MODEL_ID,
     SPEC,
     RawSpan,
@@ -13,8 +13,8 @@ from murmurs.backends.openmed_ner import (
     snap_to_words,
     windows,
 )
-from murmurs.backends.registry import BackendKind
-from murmurs.config import load_config
+from otus.backends.registry import BackendKind
+from otus.config import load_config
 
 
 @pytest.mark.parametrize("n", [0, 1, 2048, 2049, 5000, 30_000])
@@ -94,8 +94,8 @@ def test_registry_declares_only_inference_files(stub_job: StubJob) -> None:
 def test_real_ner_finds_planted_fake_phi(
     stub_job: StubJob, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from murmurs.backends.openmed_ner import OpenMedNER
-    from murmurs.offline import enforce_offline
+    from otus.backends.openmed_ner import OpenMedNER
+    from otus.offline import enforce_offline
 
     monkeypatch.delenv("HF_TOKEN", raising=False)
     enforce_offline()

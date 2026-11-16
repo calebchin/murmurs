@@ -21,8 +21,8 @@ from conftest import SENTINEL, StubJob
 from pydantic import BaseModel
 from typer.testing import CliRunner
 
-from murmurs.backends import LLMClient, gptoss, registry
-from murmurs.backends.gptoss import (
+from otus.backends import LLMClient, gptoss, registry
+from otus.backends.gptoss import (
     GUARD_DIR,
     LLM_INVALID_OUTPUT,
     LLM_REQUEST_FAILED,
@@ -36,11 +36,11 @@ from murmurs.backends.gptoss import (
     server_command,
     server_environment,
 )
-from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import StubLLMClient
-from murmurs.cli import app
-from murmurs.config import LLMServerConfig, load_config
-from murmurs.errors import LLM_OUTPUT_TRUNCATED, BackendSetupError, PipelineError
+from otus.backends.registry import BackendKind
+from otus.backends.stubs import StubLLMClient
+from otus.cli import app
+from otus.config import LLMServerConfig, load_config
+from otus.errors import LLM_OUTPUT_TRUNCATED, BackendSetupError, PipelineError
 
 
 class Answer(BaseModel):
@@ -232,7 +232,7 @@ class _ChatHandler(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def unix_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-    path = Path(os.path.join("/tmp", f"murmurs-test-{os.getpid()}.sock"))
+    path = Path(os.path.join("/tmp", f"otus-test-{os.getpid()}.sock"))
     path.unlink(missing_ok=True)
     server = socketserver.UnixStreamServer(str(path), _ChatHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -434,7 +434,7 @@ def caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     hub = tmp_path / "hf" / "hub"
     hub.mkdir(parents=True)
     monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(hub))
-    monkeypatch.setenv("MURMURS_CACHE", str(tmp_path / "murmurs-cache"))
+    monkeypatch.setenv("OTUS_CACHE", str(tmp_path / "otus-cache"))
     return tmp_path
 
 
@@ -523,7 +523,7 @@ def test_models_check_reports_missing_llm_setup(stub_job: StubJob, caches: Path)
 
 
 def test_starting_without_setup_fails_with_a_setup_error(caches: Path) -> None:
-    with pytest.raises(BackendSetupError, match="murmurs models download"):
+    with pytest.raises(BackendSetupError, match="otus models download"):
         gptoss.start_gpt_oss(LLMServerConfig())
 
 
@@ -533,7 +533,7 @@ def test_starting_without_setup_fails_with_a_setup_error(caches: Path) -> None:
 @pytest.mark.gpu
 def test_real_server_answers_a_structured_request_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    from murmurs.offline import enforce_offline
+    from otus.offline import enforce_offline
 
     enforce_offline()
     with gptoss.start_gpt_oss(LLMServerConfig()) as llm:

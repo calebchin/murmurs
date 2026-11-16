@@ -11,7 +11,7 @@ import pytest
 import yaml
 from fixtures.audio import tone_wav_bytes, write_tone_m4a
 
-from murmurs.offline import OFFLINE_ENV
+from otus.offline import OFFLINE_ENV
 
 SENTINEL = "SENTINEL_PHI_7f3a"
 

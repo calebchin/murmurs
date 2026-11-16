@@ -1,4 +1,4 @@
-# murmurs
+# otus
 
 Speech to text for clinical interviews, with an automated deidentification pass. Everything runs locally; see `docs/design.md` for the full design.
 
@@ -23,7 +23,7 @@ Then edit `my_job.yaml`. At minimum, set the two paths:
 ```yaml
 data:
   input_dir: /path/to/interview/audio    # read only; never modified
-  output_dir: /path/to/murmurs/output    # must not be inside input_dir
+  output_dir: /path/to/otus/output    # must not be inside input_dir
 ```
 
 For the fast configuration (verbatim transcript only, speculative decoding, no LLM speaker correction), also set:
@@ -44,8 +44,8 @@ The output folder name is the config file name (`my_job` here), unless you pass 
 ## 3. Prepare the models (once, while online)
 
 ```bash
-uv run murmurs models download -c my_job.yaml   # weights, CTranslate2 conversion, vLLM server environment
-uv run murmurs models check -c my_job.yaml      # confirms everything is cached; never uses the network
+uv run otus models download -c my_job.yaml   # weights, CTranslate2 conversion, vLLM server environment
+uv run otus models check -c my_job.yaml      # confirms everything is cached; never uses the network
 ```
 
 Rerun `models download` if you change a model in the config, such as adding `draft_model`. Runs never use the network.
@@ -53,7 +53,7 @@ Rerun `models download` if you change a model in the config, such as adding `dra
 ## 4. Run the job
 
 ```bash
-uv run murmurs run -c my_job.yaml
+uv run otus run -c my_job.yaml
 ```
 
 - Check the resolved settings without running: add `--dry-run`.
@@ -82,9 +82,9 @@ All evaluation output is counts and label IDs only, never transcript text.
 **Synthetic set** (fictional PHI, committed under `eval/synthetic/`):
 
 ```bash
-uv run murmurs eval check eval/synthetic                     # validate; per-type label counts
-uv run murmurs eval run eval/synthetic -c my_job.yaml        # detect, then recall and precision per type
-uv run murmurs eval run eval/synthetic -c my_job.yaml --out <folder>   # resume or rescore an earlier run
+uv run otus eval check eval/synthetic                     # validate; per-type label counts
+uv run otus eval run eval/synthetic -c my_job.yaml        # detect, then recall and precision per type
+uv run otus eval run eval/synthetic -c my_job.yaml --out <folder>   # resume or rescore an earlier run
 ```
 
 `eval run` writes `scores.json`, plus each interview's detections and annotated rendering, to `<output_dir>/eval/<timestamp>/`. You can also pick a folder with `--out`. Rerun with the same `--out` to resume: interviews already detected with the same settings are skipped, and every interview is scored again.
@@ -94,13 +94,13 @@ uv run murmurs eval run eval/synthetic -c my_job.yaml --out <folder>   # resume 
 1. Put the raw `.txt` transcripts in one folder and the deidentified copies in another, at the same relative paths. Each turn starts with `Speaker 1:` or `SPEAKER_1:`. File names must contain `CECA` or `LEDS`.
 2. Collect the reviewers' tags (`[NAME]`, `[SCHOOL]`, ...) into a mapping file:
    ```bash
-   uv run murmurs eval tags <raw> <deid> tags.yaml -c my_job.yaml
+   uv run otus eval tags <raw> <deid> tags.yaml -c my_job.yaml
    ```
 3. Edit `tags.yaml`: give each tag an entity type from `deid.entity_types`, or `IGNORE`.
 4. Import, then check and score as above:
    ```bash
-   uv run murmurs eval import <raw> <deid> <new folder> -t tags.yaml -c my_job.yaml
-   uv run murmurs eval run <new folder> -c my_job.yaml
+   uv run otus eval import <raw> <deid> <new folder> -t tags.yaml -c my_job.yaml
+   uv run otus eval run <new folder> -c my_job.yaml
    ```
 
 To use only the transcripts a reviewer has finished, add `--only done.csv` to both `eval tags` and `eval import`. The CSV's `Annotated` column (or the one you pick with `--column`) lists the file names. After changing the mapping, re-import into a new folder; `eval run --out` with the earlier results folder rescores without detecting again.

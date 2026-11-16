@@ -11,11 +11,11 @@ import pytest
 from conftest import SENTINEL, StubJob
 from fixtures.audio import tone_wav_bytes, write_tone, write_tone_encoded, write_tone_m4a
 
-from murmurs.backends.audio import TorchcodecAudioLoader, _wav_data_truncated
-from murmurs.config import DataConfig, JobConfig, Stage, load_config
-from murmurs.models import IngestErrorCode, StageStatus, ValidationResult
-from murmurs.runner import JobSummary, run_job
-from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
+from otus.backends.audio import TorchcodecAudioLoader, _wav_data_truncated
+from otus.config import DataConfig, JobConfig, Stage, load_config
+from otus.models import IngestErrorCode, StageStatus, ValidationResult
+from otus.runner import JobSummary, run_job
+from otus.store import ArtifactStore, file_id_from_hash, hash_file
 
 EXTENSIONS = [".wav", ".m4a"]
 

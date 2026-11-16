@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from murmurs.backends import (
+from otus.backends import (
     AudioLoader,
     Diarizer,
     LLMClient,
@@ -17,9 +17,9 @@ from murmurs.backends import (
     Waveform,
     registry,
 )
-from murmurs.backends.audio import TorchcodecAudioLoader
-from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import (
+from otus.backends.audio import TorchcodecAudioLoader
+from otus.backends.registry import BackendKind
+from otus.backends.stubs import (
     STUB_FAILURE,
     StubAudioLoader,
     StubDiarizer,
@@ -27,9 +27,9 @@ from murmurs.backends.stubs import (
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.config import JobConfig, load_config
-from murmurs.errors import BackendSetupError, PipelineError
-from murmurs.models import TranscriptMode
+from otus.config import JobConfig, load_config
+from otus.errors import BackendSetupError, PipelineError
+from otus.models import TranscriptMode
 
 SENTINEL = "SENTINEL_PHI_7f3a"
 EXAMPLE = Path(__file__).parent.parent / "examples" / "job.yaml"

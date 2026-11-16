@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from murmurs.config import Stage, load_config
-from murmurs.models import (
+from otus.config import Stage, load_config
+from otus.models import (
     TOP_LEVEL_ARTIFACTS,
     AudioInfo,
     AuditAction,

@@ -12,24 +12,24 @@ import pytest
 from conftest import SENTINEL, StubJob
 from typer.testing import CliRunner
 
-from murmurs import stages as stages_module
-from murmurs.backends import Waveform, registry
-from murmurs.backends.crisper import CrisperWhisperTranscriber
-from murmurs.backends.registry import DEFAULT_AUDIO_LOADER, BackendKind
-from murmurs.backends.stubs import (
+from otus import stages as stages_module
+from otus.backends import Waveform, registry
+from otus.backends.crisper import CrisperWhisperTranscriber
+from otus.backends.registry import DEFAULT_AUDIO_LOADER, BackendKind
+from otus.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
     StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.cli import app
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.errors import BackendSetupError
-from murmurs.models import StageStatus
-from murmurs.runner import run_job
-from murmurs.stages import Backends, stage_groups
-from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
+from otus.cli import app
+from otus.config import JobConfig, Stage, load_config
+from otus.errors import BackendSetupError
+from otus.models import StageStatus
+from otus.runner import run_job
+from otus.stages import Backends, stage_groups
+from otus.store import ArtifactStore, file_id_from_hash, hash_file
 
 Event = tuple[str, str]
 
@@ -82,7 +82,7 @@ class Recorder:
             def transcribe(self, waveform: Waveform, file_id: str, modes: Any) -> Any:
                 log.append(("transcribe", file_id))
                 if file_id in recorder.fail_transcribe:
-                    from murmurs.errors import PipelineError
+                    from otus.errors import PipelineError
 
                     raise PipelineError("STUB_FAILURE")
                 return super().transcribe(waveform, file_id, modes)

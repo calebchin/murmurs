@@ -219,7 +219,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# --- murmurs ---
+# --- otus ---
 # Pipeline outputs
 outputs/
 output/

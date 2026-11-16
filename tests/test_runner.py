@@ -8,18 +8,18 @@ import pytest
 from conftest import SENTINEL, StubJob
 from typer.testing import CliRunner
 
-from murmurs.backends.stubs import (
+from otus.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
     StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.cli import app
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.errors import BackendSetupError
-from murmurs.models import FileStatus, StageStatus, Transcript
-from murmurs.runner import (
+from otus.cli import app
+from otus.config import JobConfig, Stage, load_config
+from otus.errors import BackendSetupError
+from otus.models import FileStatus, StageStatus, Transcript
+from otus.runner import (
     EXIT_FILES_FAILED,
     EXIT_OK,
     JobSetupError,
@@ -27,8 +27,8 @@ from murmurs.runner import (
     run_job,
     stage_hashes,
 )
-from murmurs.stages import Backends
-from murmurs.store import ArtifactStore, OutputInsideInputError, file_id_from_hash, hash_file
+from otus.stages import Backends
+from otus.store import ArtifactStore, OutputInsideInputError, file_id_from_hash, hash_file
 
 
 class Stubs:

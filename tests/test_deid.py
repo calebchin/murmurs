@@ -9,10 +9,10 @@ import pytest
 from conftest import SENTINEL, StubJob
 from fixtures.audio import tone_wav_bytes
 
-from murmurs.backends import M, registry
-from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import StubNERDetector, StubTranscriber
-from murmurs.config import (
+from otus.backends import M, registry
+from otus.backends.registry import BackendKind
+from otus.backends.stubs import StubNERDetector, StubTranscriber
+from otus.config import (
     PROVISIONAL_ENTITY_TYPES,
     EntityAction,
     EntityType,
@@ -20,8 +20,8 @@ from murmurs.config import (
     Stage,
     load_config,
 )
-from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
-from murmurs.models import (
+from otus.errors import LLM_INVALID_OUTPUT, PipelineError
+from otus.models import (
     DeidReport,
     DetectorSource,
     LLMUsage,
@@ -32,8 +32,8 @@ from murmurs.models import (
     TranscriptMode,
     Word,
 )
-from murmurs.runner import run_job
-from murmurs.stages.deid import (
+from otus.runner import run_job
+from otus.stages.deid import (
     DEID_LINE_TOKENS,
     Candidate,
     chunk_lines,
@@ -47,7 +47,7 @@ from murmurs.stages.deid import (
     render_annotated,
     render_clean,
 )
-from murmurs.store import ArtifactStore, canonical_text
+from otus.store import ArtifactStore, canonical_text
 
 TYPES = list(PROVISIONAL_ENTITY_TYPES)
 LLM, NER = DetectorSource.LLM, DetectorSource.NER
@@ -470,11 +470,11 @@ def test_stage_writes_layer_renderings_and_report(stub_job: StubJob, correction:
 def test_editing_the_deid_prompt_reruns_only_detect_phi(
     stub_job: StubJob, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from murmurs.runner import stage_hashes
+    from otus.runner import stage_hashes
 
     config, _ = _job(stub_job, "hello there")
     before = stage_hashes(config)
-    monkeypatch.setattr("murmurs.stages.deid_prompt_hash", lambda: "edited")
+    monkeypatch.setattr("otus.stages.deid_prompt_hash", lambda: "edited")
     after = stage_hashes(config)
     assert before[Stage.DETECT_PHI] != after[Stage.DETECT_PHI]
     assert before[Stage.ASSIGN_SPEAKERS] == after[Stage.ASSIGN_SPEAKERS]
@@ -534,7 +534,7 @@ def test_deid_result_is_the_same_with_and_without_concurrency() -> None:
 
 
 def test_reasoning_effort_reruns_the_llm_stages(stub_job: StubJob) -> None:
-    from murmurs.runner import stage_hashes
+    from otus.runner import stage_hashes
 
     config, _ = _job(stub_job, "hello there", correction=True)
     low = config.model_copy(
@@ -567,8 +567,8 @@ def test_reasoning_effort_reruns_the_llm_stages(stub_job: StubJob) -> None:
 def test_chunk_sizes_rerun_the_llm_stages(
     stub_job: StubJob, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from murmurs.runner import stage_hashes
-    from murmurs.stages import correction, deid
+    from otus.runner import stage_hashes
+    from otus.stages import correction, deid
 
     config, _ = _job(stub_job, "hello there", correction=True)
     before = stage_hashes(config)

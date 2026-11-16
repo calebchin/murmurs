@@ -8,8 +8,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from murmurs.cli import app
-from murmurs.config import (
+from otus.cli import app
+from otus.config import (
     CURRENT_SCHEMA_VERSION,
     PROVISIONAL_ENTITY_TYPES,
     ConfigError,
@@ -100,8 +100,8 @@ def test_newer_schema_version_fails_clearly(tmp_path: Path) -> None:
     raw["schema_version"] = 999
     err = _load_error(tmp_path, raw)
     assert err.problems == [
-        f"schema_version: version 999 is newer than this version of murmurs supports "
-        f"(up to {CURRENT_SCHEMA_VERSION}); upgrade murmurs"
+        f"schema_version: version 999 is newer than this version of otus supports "
+        f"(up to {CURRENT_SCHEMA_VERSION}); upgrade otus"
     ]
 
 

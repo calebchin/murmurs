@@ -11,15 +11,15 @@ import pytest
 from conftest import StubJob
 from fixtures.audio import tone_wav_bytes, write_tone, write_tone_encoded, write_tone_m4a
 
-from murmurs.backends import Waveform
-from murmurs.backends.audio import DECODE_FAILED, TARGET_SAMPLE_RATE, TorchcodecAudioLoader
-from murmurs.backends.stubs import StubDiarizer, StubLLMClient, StubNERDetector, StubTranscriber
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.errors import PipelineError
-from murmurs.models import AudioInfo, RedactionSpan, StageStatus, ValidationResult
-from murmurs.runner import run_job
-from murmurs.stages import Backends
-from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
+from otus.backends import Waveform
+from otus.backends.audio import DECODE_FAILED, TARGET_SAMPLE_RATE, TorchcodecAudioLoader
+from otus.backends.stubs import StubDiarizer, StubLLMClient, StubNERDetector, StubTranscriber
+from otus.config import JobConfig, Stage, load_config
+from otus.errors import PipelineError
+from otus.models import AudioInfo, RedactionSpan, StageStatus, ValidationResult
+from otus.runner import run_job
+from otus.stages import Backends
+from otus.store import ArtifactStore, file_id_from_hash, hash_file
 
 EXTENSIONS = [".wav", ".m4a"]
 EDGE = int(0.1 * TARGET_SAMPLE_RATE)

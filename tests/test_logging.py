@@ -11,12 +11,12 @@ import pytest
 from conftest import StubJob
 from typer.testing import CliRunner
 
-from murmurs.backends import Waveform
-from murmurs.backends.stubs import StubDiarizer, StubTranscriber
-from murmurs.cli import app
-from murmurs.config import Stage
-from murmurs.errors import PipelineError
-from murmurs.logging import (
+from otus.backends import Waveform
+from otus.backends.stubs import StubDiarizer, StubTranscriber
+from otus.cli import app
+from otus.config import Stage
+from otus.errors import PipelineError
+from otus.logging import (
     DEBUG_UNSAFE_WARNING,
     UNEXPECTED_ERROR,
     FileOutcome,
@@ -27,7 +27,7 @@ from murmurs.logging import (
     UnsafeLogFieldError,
     install_excepthook,
 )
-from murmurs.models import StageStatus, TranscriptMode
+from otus.models import StageStatus, TranscriptMode
 
 SENTINEL = "SENTINEL_PHI_7f3a"
 EXAMPLE = Path(__file__).parent.parent / "examples" / "job.yaml"
@@ -155,7 +155,7 @@ def test_excepthook_logs_crash_without_message(
         raise RuntimeError(SENTINEL)
     except RuntimeError as exc:
         sys.excepthook(type(exc), exc, exc.__traceback__)
-    assert "murmurs crashed: RuntimeError (UNEXPECTED_ERROR); see logs" in console.getvalue()
+    assert "otus crashed: RuntimeError (UNEXPECTED_ERROR); see logs" in console.getvalue()
     assert _records(logger)[0]["event"] == "crash"
     assert SENTINEL not in _all_output(tmp_path, console)
 

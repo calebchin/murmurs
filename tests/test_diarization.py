@@ -13,25 +13,25 @@ import yaml
 from conftest import StubJob
 from typer.testing import CliRunner
 
-from murmurs.backends import registry
-from murmurs.backends.device import resolve_device
-from murmurs.backends.nemotron import MODEL_ID, WEIGHT_FILES, segments_to_turns
-from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import (
+from otus.backends import registry
+from otus.backends.device import resolve_device
+from otus.backends.nemotron import MODEL_ID, WEIGHT_FILES, segments_to_turns
+from otus.backends.registry import BackendKind
+from otus.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
     StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.cli import app
-from murmurs.config import CURRENT_SCHEMA_VERSION, Device, Stage, load_config, validate_config
-from murmurs.errors import BackendSetupError
-from murmurs.models import UNKNOWN_SPEAKER, AudioInfo, Diarization, SpeakerTurn
-from murmurs.offline import WeightSpec
-from murmurs.runner import run_job
-from murmurs.stages import Backends
-from murmurs.store import ArtifactStore
+from otus.cli import app
+from otus.config import CURRENT_SCHEMA_VERSION, Device, Stage, load_config, validate_config
+from otus.errors import BackendSetupError
+from otus.models import UNKNOWN_SPEAKER, AudioInfo, Diarization, SpeakerTurn
+from otus.offline import WeightSpec
+from otus.runner import run_job
+from otus.stages import Backends
+from otus.store import ArtifactStore
 
 
 def _seg(start: float, end: float, speaker: int) -> dict[str, Any]:
@@ -134,7 +134,7 @@ def test_missing_weights_exit_2_before_any_file(stub_job: StubJob, empty_hub_cac
     config_path = stub_job(diarization={"model": MODEL_ID})
     run = CliRunner().invoke(app, ["run", "-c", str(config_path)])
     assert run.exit_code == 2
-    assert MODEL_ID in run.stderr and "murmurs models download" in run.stderr
+    assert MODEL_ID in run.stderr and "otus models download" in run.stderr
     config = load_config(config_path)
     store = ArtifactStore(config.data.output_dir, config.data.input_dir, "job")
     assert not (store.job_dir / "files").exists()
@@ -182,7 +182,7 @@ def test_runner_logs_cpu_fallback(stub_job: StubJob) -> None:
 
 # --- real model (only with -m gpu) -------------------------------------------------------------
 
-EXAMPLE_DIR = os.environ.get("MURMURS_EXAMPLE_AUDIO_DIR")
+EXAMPLE_DIR = os.environ.get("OTUS_EXAMPLE_AUDIO_DIR")
 
 
 def _covered(turns: list[SpeakerTurn]) -> float:
@@ -196,7 +196,7 @@ def _covered(turns: list[SpeakerTurn]) -> float:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not EXAMPLE_DIR, reason="MURMURS_EXAMPLE_AUDIO_DIR is not set")
+@pytest.mark.skipif(not EXAMPLE_DIR, reason="OTUS_EXAMPLE_AUDIO_DIR is not set")
 def test_example_audio_diarizes_offline_without_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

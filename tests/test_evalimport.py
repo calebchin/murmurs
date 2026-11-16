@@ -1,4 +1,4 @@
-"""Importing human-deidentified transcripts as an evaluation set (``murmurs eval import``)."""
+"""Importing human-deidentified transcripts as an evaluation set (``otus eval import``)."""
 
 import hashlib
 import json
@@ -8,9 +8,9 @@ import pytest
 from conftest import SENTINEL
 from typer.testing import CliRunner
 
-from murmurs.cli import app
-from murmurs.config import PROVISIONAL_ENTITY_TYPES
-from murmurs.evalimport import (
+from otus.cli import app
+from otus.config import PROVISIONAL_ENTITY_TYPES
+from otus.evalimport import (
     IGNORE,
     EvalImportError,
     Turn,
@@ -21,7 +21,7 @@ from murmurs.evalimport import (
     pair_files,
     parse_turns,
 )
-from murmurs.evalset import load_dir, parse_interview
+from otus.evalset import load_dir, parse_interview
 
 TYPES = [e.name for e in PROVISIONAL_ENTITY_TYPES]
 
@@ -248,7 +248,7 @@ def test_import_refuses_a_used_or_input_output_folder(tmp_path: Path) -> None:
     mapping = tmp_path / "tags.yaml"
     mapping.write_text("NAME: PERSON\n")
     pairing = pair_files(raw, deid)
-    from murmurs.evalimport import import_pairs
+    from otus.evalimport import import_pairs
 
     with pytest.raises(EvalImportError, match="outside the input folders"):
         import_pairs(pairing, load_mapping(mapping), raw / "out", [raw, deid])
@@ -286,7 +286,7 @@ def _three_pairs(tmp_path: Path) -> tuple[Path, Path]:
 def test_file_list_matches_names_loosely_and_skips_blank_cells(tmp_path: Path) -> None:
     listing = tmp_path / "done.csv"
     listing.write_text("﻿Annotated\n P01_ceca.txt \np02_LEDS\n\n", encoding="utf-8")
-    from murmurs.evalimport import load_file_list, select_pairs
+    from otus.evalimport import load_file_list, select_pairs
 
     names = load_file_list(listing, "Annotated")
     assert names == {"p01_ceca", "p02_leds"}
@@ -299,7 +299,7 @@ def test_file_list_matches_names_loosely_and_skips_blank_cells(tmp_path: Path) -
 def test_file_list_without_the_column_is_refused(tmp_path: Path) -> None:
     listing = tmp_path / "done.csv"
     listing.write_text("Done\np01_CECA\n")
-    from murmurs.evalimport import load_file_list
+    from otus.evalimport import load_file_list
 
     with pytest.raises(EvalImportError, match="no column named 'Annotated'"):
         load_file_list(listing, "Annotated")

@@ -13,18 +13,18 @@ from conftest import SENTINEL
 from fixtures.audio import write_tone
 from typer.testing import CliRunner, Result
 
-from murmurs.backends import registry
-from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import (
+from otus.backends import registry
+from otus.backends.registry import BackendKind
+from otus.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.cli import EXIT_INTERRUPTED, app
-from murmurs.config import Stage
-from murmurs.models import StageStatus
-from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
+from otus.cli import EXIT_INTERRUPTED, app
+from otus.config import Stage
+from otus.models import StageStatus
+from otus.store import ArtifactStore, file_id_from_hash, hash_file
 
 TRANSCRIPT_TEXT = f"my name is {SENTINEL} and I live nearby"
 
