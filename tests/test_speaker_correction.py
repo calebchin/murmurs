@@ -11,11 +11,11 @@ from conftest import SENTINEL, StubJob
 from fixtures.audio import tone_wav_bytes
 from pydantic import ValidationError
 
-from murmurs.backends import M, registry
-from murmurs.backends.registry import BackendKind
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
-from murmurs.models import (
+from otus.backends import M, registry
+from otus.backends.registry import BackendKind
+from otus.config import JobConfig, Stage, load_config
+from otus.errors import LLM_INVALID_OUTPUT, PipelineError
+from otus.models import (
     UNKNOWN_SPEAKER,
     LLMUsage,
     Segment,
@@ -25,10 +25,10 @@ from murmurs.models import (
     TranscriptMode,
     Word,
 )
-from murmurs.runner import backend_kinds, run_job, stage_hashes
-from murmurs.stages import correction
-from murmurs.stages.assign import words_of
-from murmurs.stages.correction import (
+from otus.runner import backend_kinds, run_job, stage_hashes
+from otus.stages import correction
+from otus.stages.assign import words_of
+from otus.stages.correction import (
     LabelChange,
     SpeakerCorrections,
     chunk_transcript,
@@ -37,7 +37,7 @@ from murmurs.stages.correction import (
     follow_changes,
     render_chunk,
 )
-from murmurs.store import ArtifactStore
+from otus.store import ArtifactStore
 
 A, B = "SPEAKER_00", "SPEAKER_01"
 INT, VERB = TranscriptMode.INTENDED, TranscriptMode.VERBATIM
@@ -360,7 +360,7 @@ def _job(
 
 def _run(config: JobConfig, console: io.StringIO | None = None, text: str | None = None) -> Any:
     if text is not None:
-        from murmurs.backends.stubs import StubTranscriber
+        from otus.backends.stubs import StubTranscriber
 
         registry.register(BackendKind.TRANSCRIBER, "stub", lambda _: StubTranscriber(text=text))
     return run_job(config, "job", console=console or io.StringIO())
@@ -445,7 +445,7 @@ def test_editing_the_prompt_changes_the_assignment_hash(
 ) -> None:
     config = _job(stub_job, correction_on=True)
     first = stage_hashes(config)
-    monkeypatch.setattr("murmurs.stages.prompt_hash", lambda: "edited")
+    monkeypatch.setattr("otus.stages.prompt_hash", lambda: "edited")
     second = stage_hashes(config)
     assert first[Stage.ASSIGN_SPEAKERS] != second[Stage.ASSIGN_SPEAKERS]
     assert first[Stage.TRANSCRIBE] == second[Stage.TRANSCRIBE]
@@ -534,7 +534,7 @@ def test_concurrency_does_not_change_the_result() -> None:
 
 
 def test_report_records_splits_and_llm_usage() -> None:
-    from murmurs.backends.stubs import StubLLMClient
+    from otus.backends.stubs import StubLLMClient
 
     llm = StubLLMClient(response={"changes": []})
     _, report = correct_modes({INT: _three()}, llm, "f1", 32768, max_concurrency=4)

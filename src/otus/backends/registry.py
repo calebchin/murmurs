@@ -13,7 +13,7 @@ model names in later phases. Backends are created on demand, so a run that stops
 before PHI detection never loads the NER model or the LLM.
 
 Each registration can declare the model weights its backend needs (see
-``murmurs.offline``), so they can be downloaded ahead of time and checked before a run.
+``otus.offline``), so they can be downloaded ahead of time and checked before a run.
 Factories must import model libraries inside the factory, never at module level here,
 so that offline mode is in force before those libraries are imported.
 """
@@ -25,30 +25,30 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber
-from murmurs.backends.audio import TorchcodecAudioLoader
-from murmurs.backends.crisper import MODEL_ID as CRISPERWHISPER_ID
-from murmurs.backends.crisper import (
+from otus.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber
+from otus.backends.audio import TorchcodecAudioLoader
+from otus.backends.crisper import MODEL_ID as CRISPERWHISPER_ID
+from otus.backends.crisper import (
     create_crisperwhisper,
     crisperwhisper_prepared,
     crisperwhisper_weights,
 )
-from murmurs.backends.gptoss import MODEL_ID as GPT_OSS_ID
-from murmurs.backends.gptoss import create_gpt_oss, gpt_oss_prepared, gpt_oss_weights
-from murmurs.backends.nemotron import MODEL_ID as NEMOTRON_ID
-from murmurs.backends.nemotron import NemotronDiarizer, nemotron_weights
-from murmurs.backends.openmed_ner import MODEL_ID as OPENMED_ID
-from murmurs.backends.openmed_ner import OpenMedNER, openmed_weights
-from murmurs.backends.stubs import (
+from otus.backends.gptoss import MODEL_ID as GPT_OSS_ID
+from otus.backends.gptoss import create_gpt_oss, gpt_oss_prepared, gpt_oss_weights
+from otus.backends.nemotron import MODEL_ID as NEMOTRON_ID
+from otus.backends.nemotron import NemotronDiarizer, nemotron_weights
+from otus.backends.openmed_ner import MODEL_ID as OPENMED_ID
+from otus.backends.openmed_ner import OpenMedNER, openmed_weights
+from otus.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
     StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.config import JobConfig
-from murmurs.errors import BackendSetupError
-from murmurs.offline import PreparedModel, WeightSpec
+from otus.config import JobConfig
+from otus.errors import BackendSetupError
+from otus.offline import PreparedModel, WeightSpec
 
 STUB = "stub"
 DEFAULT_AUDIO_LOADER = "default"

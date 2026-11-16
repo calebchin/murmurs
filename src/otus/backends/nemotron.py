@@ -13,12 +13,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from murmurs.backends import Waveform
-from murmurs.backends.device import resolve_device
-from murmurs.config import JobConfig
-from murmurs.errors import BackendSetupError, PipelineError
-from murmurs.models import UNKNOWN_SPEAKER, Diarization, SpeakerTurn
-from murmurs.offline import WeightSpec
+from otus.backends import Waveform
+from otus.backends.device import resolve_device
+from otus.config import JobConfig
+from otus.errors import BackendSetupError, PipelineError
+from otus.models import UNKNOWN_SPEAKER, Diarization, SpeakerTurn
+from otus.offline import WeightSpec
 
 MODEL_ID = "nvidia/Nemotron-3-Diarization"
 WEIGHT_FILES = ("config.json", "processor_config.json", "model.safetensors")
@@ -133,7 +133,7 @@ class NemotronDiarizer:
 
 
 if TYPE_CHECKING:
-    from murmurs.backends import Diarizer
+    from otus.backends import Diarizer
 
     def _check(config: JobConfig) -> Diarizer:
         # Static proof (checked by mypy) that the diarizer satisfies its protocol.

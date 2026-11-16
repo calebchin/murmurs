@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from murmurs.config import Device
-from murmurs.errors import BackendSetupError
+from otus.config import Device
+from otus.errors import BackendSetupError
 
 
 def resolve_device(setting: Device) -> tuple[str, bool]:

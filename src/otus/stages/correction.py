@@ -20,8 +20,8 @@ from string import Template
 
 from pydantic import BaseModel, ConfigDict
 
-from murmurs.backends import LLMClient
-from murmurs.models import (
+from otus.backends import LLMClient
+from otus.models import (
     UNKNOWN_SPEAKER,
     SpeakerCorrection,
     SpeakerTurn,
@@ -29,8 +29,8 @@ from murmurs.models import (
     TranscriptMode,
     Word,
 )
-from murmurs.stages.assign import _Turns, relabel, words_of
-from murmurs.stages.llm_chunks import halves, run_chunks
+from otus.stages.assign import _Turns, relabel, words_of
+from otus.stages.llm_chunks import halves, run_chunks
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 SYSTEM_PROMPT = PROMPT_DIR / "speaker_correction_system.txt"

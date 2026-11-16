@@ -17,8 +17,8 @@ import yaml
 from conftest import SENTINEL, StubJob
 from typer.testing import CliRunner
 
-from murmurs.backends import Waveform, crisper, registry
-from murmurs.backends.crisper import (
+from otus.backends import Waveform, crisper, registry
+from otus.backends.crisper import (
     MODEL_ID,
     READY_MARKER,
     SPEC,
@@ -30,16 +30,16 @@ from murmurs.backends.crisper import (
     create_crisperwhisper,
     words_to_transcript,
 )
-from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import StubAudioLoader, StubDiarizer, StubLLMClient, StubNERDetector
-from murmurs.cli import app
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.errors import BackendSetupError, PipelineError
-from murmurs.models import AudioInfo, Transcript, TranscriptMode
-from murmurs.offline import PreparedModel, UnpreparedModelError, WeightSpec
-from murmurs.runner import run_job
-from murmurs.stages import Backends
-from murmurs.store import ArtifactStore
+from otus.backends.registry import BackendKind
+from otus.backends.stubs import StubAudioLoader, StubDiarizer, StubLLMClient, StubNERDetector
+from otus.cli import app
+from otus.config import JobConfig, Stage, load_config
+from otus.errors import BackendSetupError, PipelineError
+from otus.models import AudioInfo, Transcript, TranscriptMode
+from otus.offline import PreparedModel, UnpreparedModelError, WeightSpec
+from otus.runner import run_job
+from otus.stages import Backends
+from otus.store import ArtifactStore
 
 VERB, INT = TranscriptMode.VERBATIM, TranscriptMode.INTENDED
 DRAFT_ID = "nyralabs/CrisperWhisper2.0_turbo"
@@ -419,7 +419,7 @@ def test_unconverted_draft_model_fails_setup(
 
 
 def test_draft_model_reruns_transcription_only_when_set(stub_job: StubJob) -> None:
-    from murmurs.runner import stage_hashes
+    from otus.runner import stage_hashes
 
     plain = load_config(stub_job())
     spec = load_config(stub_job(transcription={"draft_model": DRAFT_ID}))
@@ -430,7 +430,7 @@ def test_draft_model_reruns_transcription_only_when_set(stub_job: StubJob) -> No
 
 
 def crisper_stage_config(config: JobConfig) -> dict[str, Any]:
-    from murmurs.stages import stage_config
+    from otus.stages import stage_config
 
     return stage_config(Stage.TRANSCRIBE, config)
 
@@ -478,12 +478,12 @@ def test_unconverted_model_fails_check_and_run_and_download_converts(
     check = CliRunner().invoke(app, ["models", "check", "-c", str(config_path)])
     assert check.exit_code == 2 and f"unprepared   {label}" in check.stdout
     run = CliRunner().invoke(app, ["run", "-c", str(config_path)])
-    assert run.exit_code == 2 and label in run.stderr and "murmurs models download" in run.stderr
+    assert run.exit_code == 2 and label in run.stderr and "otus models download" in run.stderr
 
     calls: list[str] = []
     monkeypatch.setattr(crisperwhisper.converter, "ensure_ct2_model", _fake_ensure_ct2(calls))
     monkeypatch.setattr(
-        "murmurs.cli.download_weight",
+        "otus.cli.download_weight",
         lambda spec: SimpleNamespace(revision=COMMIT, size_bytes=10),
     )
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
@@ -519,7 +519,7 @@ def test_prepare_failure_reports_type_only(
 
 def test_unprepared_error_names_models() -> None:
     error = UnpreparedModelError(["a (x)", "b (y)"])
-    assert "a (x), b (y)" in str(error) and "murmurs models download" in str(error)
+    assert "a (x), b (y)" in str(error) and "otus models download" in str(error)
 
 
 # --- the CTranslate2 fork (CLAUDE.md dependency notes) ----------------------------------------
@@ -534,11 +534,11 @@ def test_ctranslate2_comes_from_the_crisperwhisper_fork() -> None:
 
 # --- real model (only with -m gpu) --------------------------------------------------------------
 
-EXAMPLE_DIR = os.environ.get("MURMURS_EXAMPLE_AUDIO_DIR")
+EXAMPLE_DIR = os.environ.get("OTUS_EXAMPLE_AUDIO_DIR")
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not EXAMPLE_DIR, reason="MURMURS_EXAMPLE_AUDIO_DIR is not set")
+@pytest.mark.skipif(not EXAMPLE_DIR, reason="OTUS_EXAMPLE_AUDIO_DIR is not set")
 def test_example_audio_transcribes_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HF_TOKEN", raising=False)
     raw = {

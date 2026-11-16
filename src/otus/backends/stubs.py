@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pydantic import ValidationError
 
-from murmurs.backends import M, Waveform
-from murmurs.errors import LLM_INVALID_OUTPUT, PipelineError
-from murmurs.models import (
+from otus.backends import M, Waveform
+from otus.errors import LLM_INVALID_OUTPUT, PipelineError
+from otus.models import (
     DetectorSource,
     Diarization,
     ErrorInfo,
@@ -211,7 +211,7 @@ class StubLLMClient(_Stub):
 
 
 if TYPE_CHECKING:
-    from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber
+    from otus.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber
 
     # Static proof (checked by mypy) that each stub satisfies its protocol.
     _audio: AudioLoader = StubAudioLoader()

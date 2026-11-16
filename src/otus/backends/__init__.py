@@ -1,8 +1,8 @@
 """Protocols and implementations for STT, diarization, NER and LLM backends.
 
 Pipeline code depends only on the protocols here. Each method takes and returns types
-from ``murmurs.models``, ``Waveform`` or plain Python types, never model-library types.
-Backends raise ``murmurs.errors.PipelineError`` for per-file failures. The runner calls
+from ``otus.models``, ``Waveform`` or plain Python types, never model-library types.
+Backends raise ``otus.errors.PipelineError`` for per-file failures. The runner calls
 ``close`` once a backend is no longer needed in a job (D21).
 """
 
@@ -17,7 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel
 
-from murmurs.models import (
+from otus.models import (
     Diarization,
     LLMUsage,
     RedactionSpan,

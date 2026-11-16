@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from murmurs.models import GroundTruthSet, RedactionLayer, RedactionSpan
+from otus.models import GroundTruthSet, RedactionLayer, RedactionSpan
 
 DETECTIONS_SUFFIX = ".detections.json"
 """Suffix of an interview's saved detections in a run folder."""

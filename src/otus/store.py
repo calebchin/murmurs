@@ -25,8 +25,8 @@ from typing import IO, TypeVar
 
 from pydantic import BaseModel
 
-from murmurs.config import Stage
-from murmurs.models import FileStatus, RunManifest, Transcript
+from otus.config import Stage
+from otus.models import FileStatus, RunManifest, Transcript
 
 FILE_ID_LENGTH = 16
 """Hex characters of the content hash used as a file ID."""

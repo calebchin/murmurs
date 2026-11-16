@@ -1,9 +1,9 @@
 ---
 interview_type: LEDS
 ---
-# Synthetic LEDS-style interview for the murmurs MVP evaluation set (D8).
+# Synthetic LEDS-style interview for the otus MVP evaluation set (D8).
 # Every name, place, organization, number and date is fictional.
-# PHI is marked {{TYPE|text}} or {{TYPE|text|note}}; see src/murmurs/evalset.py.
+# PHI is marked {{TYPE|text}} or {{TYPE|text|note}}; see src/otus/evalset.py.
 INTERVIEWER: Today I'd like to go through the last twelve months with you, so roughly from last {{DATE|November}} up to now. I'll ask about different areas of your life, like work, health, family and housing. Shall we start with where you're living at the moment?
 PARTICIPANT: Okay. I'm in a flat on {{LOCATION|Fennimore Street}} in {{LOCATION|East Darrow}}, flat {{LOCATION|3B|unit number}}. I moved there in {{DATE|February}}. Before that I was sharing a house with my partner on {{LOCATION|Linden Avenue}}.
 INTERVIEWER: What led to the move?

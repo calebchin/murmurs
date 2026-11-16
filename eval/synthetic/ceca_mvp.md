@@ -1,9 +1,9 @@
 ---
 interview_type: CECA
 ---
-# Synthetic CECA-style interview for the murmurs MVP evaluation set (D8).
+# Synthetic CECA-style interview for the otus MVP evaluation set (D8).
 # Every name, place, organization, number and date is fictional.
-# PHI is marked {{TYPE|text}} or {{TYPE|text|note}}; see src/murmurs/evalset.py.
+# PHI is marked {{TYPE|text}} or {{TYPE|text|note}}; see src/otus/evalset.py.
 INTERVIEWER: Thank you for coming in today. As I mentioned on the phone, I'm going to ask you about your childhood, up to about the age of seventeen. We can take a break at any point. Could you start by telling me where you were born?
 PARTICIPANT: Sure. I was born in {{LOCATION|Harrow Falls}}, which is a small town up near the lake. My mother had me at {{ORGANIZATION|St. Ansgar's Hospital}}, because the nearest proper hospital was there. That was in {{DATE|March 1986}}.
 INTERVIEWER: And who did you live with when you were small?

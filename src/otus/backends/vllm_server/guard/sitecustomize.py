@@ -1,16 +1,16 @@
 """Network guard for the local vLLM server's processes (D22, hard rule 4).
 
-murmurs puts this folder first on the server's ``PYTHONPATH``, so Python imports this
+otus puts this folder first on the server's ``PYTHONPATH``, so Python imports this
 module at start-up in the server and in every process it spawns. It makes every socket
 connection other than a Unix domain socket, and every name lookup for a remote host,
-fail. The server talks to murmurs only over a Unix socket, so nothing it needs is lost;
+fail. The server talks to otus only over a Unix socket, so nothing it needs is lost;
 anything that tries to reach the network (vLLM's start-up connectivity probe, for
 example) fails as it would on a disconnected machine.
 
 It covers sockets opened through Python's ``socket`` module, which is how the server's
 Python libraries connect. It does not cover native code that opens sockets itself.
 
-This module runs inside the server's own environment, not murmurs': it must use only
+This module runs inside the server's own environment, not otus': it must use only
 the standard library, and it never prints, since the server's output is discarded.
 """
 
@@ -28,19 +28,19 @@ class NetworkBlockedError(OSError):
 
 def _connect(self: socket.socket, address: object) -> None:
     if self.family != socket.AF_UNIX:
-        raise NetworkBlockedError("network access is blocked for the murmurs LLM server")
+        raise NetworkBlockedError("network access is blocked for the otus LLM server")
     _real_connect(self, address)  # type: ignore[arg-type]
 
 
 def _connect_ex(self: socket.socket, address: object) -> int:
     if self.family != socket.AF_UNIX:
-        raise NetworkBlockedError("network access is blocked for the murmurs LLM server")
+        raise NetworkBlockedError("network access is blocked for the otus LLM server")
     return _real_connect_ex(self, address)  # type: ignore[arg-type]
 
 
 def _getaddrinfo(host: object, *args: object, **kwargs: object) -> object:
     if host not in _LOCAL_HOSTS:
-        raise socket.gaierror("name lookups are blocked for the murmurs LLM server")
+        raise socket.gaierror("name lookups are blocked for the otus LLM server")
     return _real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
 
 

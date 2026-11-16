@@ -20,9 +20,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from murmurs.backends import Waveform
-from murmurs.errors import PipelineError
-from murmurs.models import ErrorInfo, IngestErrorCode, ValidationResult
+from otus.backends import Waveform
+from otus.errors import PipelineError
+from otus.models import ErrorInfo, IngestErrorCode, ValidationResult
 
 TARGET_SAMPLE_RATE = 16_000
 """Sample rate of every decoded waveform; both diarization and transcription expect it."""
@@ -169,7 +169,7 @@ def _wav_data_truncated(path: Path) -> bool:
 
 
 if TYPE_CHECKING:
-    from murmurs.backends import AudioLoader
+    from otus.backends import AudioLoader
 
     # Static proof (checked by mypy) that the loader satisfies its protocol.
     _audio: AudioLoader = TorchcodecAudioLoader([])

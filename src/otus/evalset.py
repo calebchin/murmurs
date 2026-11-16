@@ -10,7 +10,7 @@ An interview is a Markdown file::
 
 One line per turn; ``INTERVIEWER`` becomes ``SPEAKER_00`` and ``PARTICIPANT``
 ``SPEAKER_01``. Turns may also start with a speaker label such as ``SPEAKER_02``, kept as
-is (``murmurs eval import`` writes these). PHI is marked inline as ``{{TYPE|text}}`` or
+is (``otus eval import`` writes these). PHI is marked inline as ``{{TYPE|text}}`` or
 ``{{TYPE|text|note}}``. The parser builds a transcript (one segment per turn, synthetic
 word times) and labels whose offsets point into its canonical text (D9), so offsets are
 never counted by hand.
@@ -27,7 +27,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from murmurs.models import (
+from otus.models import (
     GroundTruthLabel,
     GroundTruthSet,
     InterviewType,
@@ -36,7 +36,7 @@ from murmurs.models import (
     TranscriptMode,
     Word,
 )
-from murmurs.store import canonical_text
+from otus.store import canonical_text
 
 SPEAKERS = {"INTERVIEWER": "SPEAKER_00", "PARTICIPANT": "SPEAKER_01"}
 WORD_S = 0.3

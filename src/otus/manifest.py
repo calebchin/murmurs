@@ -10,9 +10,9 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TypeVar
 
-from murmurs import __version__
-from murmurs.config import JobConfig
-from murmurs.models import FileStatus, RunManifest
+from otus import __version__
+from otus.config import JobConfig
+from otus.models import FileStatus, RunManifest
 
 KEY_DEPENDENCIES = (
     "pydantic",
@@ -64,7 +64,7 @@ def dependency_versions() -> dict[str, str]:
 
 
 def code_version(source_dir: Path | None = None) -> str | None:
-    """Git commit of the murmurs source, with ``-dirty`` if it has uncommitted changes.
+    """Git commit of the otus source, with ``-dirty`` if it has uncommitted changes.
 
     Returns None when the code is not in a git checkout or git is unavailable.
     """

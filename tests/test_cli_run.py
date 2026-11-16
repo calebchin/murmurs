@@ -7,8 +7,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner, Result
 
-from murmurs.cli import app
-from murmurs.config import ConfigError, apply_override, parse_assignment, resolve_config
+from otus.cli import app
+from otus.config import ConfigError, apply_override, parse_assignment, resolve_config
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "job.yaml"
 

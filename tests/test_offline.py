@@ -15,12 +15,12 @@ import pytest
 from conftest import NetworkBlockedError, StubJob
 from typer.testing import CliRunner, Result
 
-from murmurs.backends import registry
-from murmurs.backends.registry import BackendKind
-from murmurs.backends.stubs import StubTranscriber
-from murmurs.cli import app
-from murmurs.config import load_config
-from murmurs.offline import (
+from otus.backends import registry
+from otus.backends.registry import BackendKind
+from otus.backends.stubs import StubTranscriber
+from otus.cli import app
+from otus.config import load_config
+from otus.offline import (
     OFFLINE_ENV,
     MissingWeightsError,
     WeightDownloadError,
@@ -30,11 +30,11 @@ from murmurs.offline import (
     download_weight,
     enforce_offline,
 )
-from murmurs.runner import run_job
-from murmurs.store import ArtifactStore
+from otus.runner import run_job
+from otus.store import ArtifactStore
 
-FAKE_REPO = "murmurs-test/fake-model"
-OTHER_REPO = "murmurs-test/other-model"
+FAKE_REPO = "otus-test/fake-model"
+OTHER_REPO = "otus-test/other-model"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 WEIGHTED = "stub-weighted"
 DUMMY_TOKEN = "hf_DUMMYtokenVALUE9f2c"
@@ -107,7 +107,7 @@ def test_runner_enforces_offline_before_creating_backends(stub_job: StubJob) -> 
     assert seen == {"env": "1", "hub": True}
 
 
-def test_importing_murmurs_does_not_import_model_libraries() -> None:
+def test_importing_otus_does_not_import_model_libraries() -> None:
     watched = (
         "huggingface_hub",
         "transformers",
@@ -118,8 +118,8 @@ def test_importing_murmurs_does_not_import_model_libraries() -> None:
     )
     code = (
         "import sys\n"
-        "import murmurs, murmurs.cli, murmurs.runner, murmurs.offline\n"
-        "import murmurs.backends.registry\n"
+        "import otus, otus.cli, otus.runner, otus.offline\n"
+        "import otus.backends.registry\n"
         f"print(','.join(m for m in {watched!r} if m in sys.modules))\n"
     )
     result = subprocess.run(
@@ -176,7 +176,7 @@ def test_missing_weights_fail_check_and_run_before_any_file(
 
     run = _cli("run", "-c", str(config_path))
     assert run.exit_code == 2
-    assert FAKE_REPO in run.stderr and "murmurs models download" in run.stderr
+    assert FAKE_REPO in run.stderr and "otus models download" in run.stderr
     config = load_config(config_path)
     store = ArtifactStore(config.data.output_dir, config.data.input_dir, "job")
     assert not (store.job_dir / "files").exists()

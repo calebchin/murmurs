@@ -1,7 +1,7 @@
 """Offline operation: forced Hugging Face offline mode and cached model weights.
 
 Runs never use the network. Model weights are fetched once, while connected, with
-``murmurs models download``. At run time the runner calls ``enforce_offline`` and then
+``otus models download``. At run time the runner calls ``enforce_offline`` and then
 checks that every weight the job needs is cached, before any file is processed.
 
 ``huggingface_hub`` reads its offline setting when it is first imported, so this module
@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from murmurs.errors import SetupError
+from otus.errors import SetupError
 
 OFFLINE_ENV: dict[str, str] = {
     "HF_HUB_OFFLINE": "1",
@@ -62,12 +62,12 @@ class MissingWeightsError(SetupError):
         names = ", ".join(spec.label for spec in self.missing)
         super().__init__(
             f"model weights not in the local cache: {names}. While connected to the "
-            "internet, run `murmurs models download --config <this job's config>`."
+            "internet, run `otus models download --config <this job's config>`."
         )
 
 
 class WeightDownloadError(Exception):
-    """Downloading one weight failed. ``str(exc)`` is a short message written by murmurs;
+    """Downloading one weight failed. ``str(exc)`` is a short message written by otus;
     library exception text is never included."""
 
     def __init__(self, code: str, message: str) -> None:
@@ -122,9 +122,9 @@ def cached_revision(spec: WeightSpec) -> str | None:
 class PreparedModel:
     """A model derived from downloaded weights, such as a format conversion.
 
-    ``murmurs models download`` calls ``prepare`` after downloading the weights; it runs
+    ``otus models download`` calls ``prepare`` after downloading the weights; it runs
     offline and may be slow. ``is_ready`` is a fast, offline check of its output. Runs
-    and ``murmurs models check`` treat a model that is not ready as missing.
+    and ``otus models check`` treat a model that is not ready as missing.
     """
 
     label: str
@@ -140,7 +140,7 @@ class UnpreparedModelError(SetupError):
         self.labels = list(labels)
         super().__init__(
             f"models not prepared: {', '.join(self.labels)}. While the weights are cached, "
-            "run `murmurs models download --config <this job's config>` to prepare them."
+            "run `otus models download --config <this job's config>` to prepare them."
         )
 
 
@@ -173,7 +173,7 @@ def download_weight(spec: WeightSpec) -> DownloadedWeight:
     """Download ``spec`` into the local Hugging Face cache (needs network access).
 
     ``huggingface_hub`` reads the token for gated models from ``HF_TOKEN`` or a saved
-    ``hf auth login``; murmurs never reads or prints it. Raises ``WeightDownloadError``.
+    ``hf auth login``; otus never reads or prints it. Raises ``WeightDownloadError``.
     """
     from huggingface_hub import constants, snapshot_download
     from huggingface_hub.errors import (

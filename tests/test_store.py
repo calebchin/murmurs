@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from murmurs.config import Stage, load_config
-from murmurs.models import (
+from otus.config import Stage, load_config
+from otus.models import (
     Diarization,
     FileStatus,
     RunManifest,
@@ -16,7 +16,7 @@ from murmurs.models import (
     TranscriptMode,
     Word,
 )
-from murmurs.store import (
+from otus.store import (
     FILE_ID_LENGTH,
     ArtifactStore,
     OutputInsideInputError,
@@ -122,7 +122,7 @@ def test_store_write_interrupted_at_rename_leaves_nothing(
     def fail_replace(*_: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("murmurs.store.os.replace", fail_replace)
+    monkeypatch.setattr("otus.store.os.replace", fail_replace)
     with pytest.raises(OSError):
         store.write("f1", Stage.DIARIZE, Diarization(file_id="f1", turns=[]))
     file_dir = store.file_dir("f1")

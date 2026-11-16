@@ -24,9 +24,9 @@ from string import Template
 
 from pydantic import BaseModel, ConfigDict
 
-from murmurs.backends import LLMClient, NERDetector
-from murmurs.config import EntityAction, EntityType
-from murmurs.models import (
+from otus.backends import LLMClient, NERDetector
+from otus.config import EntityAction, EntityType
+from otus.models import (
     DeidReport,
     DetectorSource,
     RedactionLayer,
@@ -35,9 +35,9 @@ from murmurs.models import (
     TranscriptMode,
     TranscriptRef,
 )
-from murmurs.stages.correction import CHARS_PER_TOKEN, CHUNK_SHARE, CONTEXT_SHARE
-from murmurs.stages.llm_chunks import halves, run_chunks
-from murmurs.store import canonical_text
+from otus.stages.correction import CHARS_PER_TOKEN, CHUNK_SHARE, CONTEXT_SHARE
+from otus.stages.llm_chunks import halves, run_chunks
+from otus.store import canonical_text
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 SYSTEM_PROMPT = PROMPT_DIR / "deid_system.txt"

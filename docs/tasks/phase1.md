@@ -11,10 +11,10 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 **Goal:** an installable, empty package with tooling in place.
 
 **Scope**
-- `uv init` with `src/` layout, package `murmurs`, Python 3.11+.
+- `uv init` with `src/` layout, package `otus`, Python 3.11+.
 - Dev dependencies: `pytest`, `ruff`, `mypy`.
 - `pyproject.toml` configures ruff, mypy (strict on `src/`) and pytest, including a `gpu` marker excluded by default.
-- CLI entry point `murmurs` (Typer or argparse; pick one and say which) with a `--version` flag.
+- CLI entry point `otus` (Typer or argparse; pick one and say which) with a `--version` flag.
 - Empty module layout: `config`, `models` (data model), `backends`, `stages`, `runner`, `store`, `logging`, `cli`.
 - `.gitignore` excluding outputs, caches, `.env`, and any audio file types. Do not ignore the `.claude/` directory itself (it holds `.claude/CLAUDE.md`); ignore only `.claude/settings.local.json`.
 
@@ -22,7 +22,7 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 
 **Acceptance criteria**
 - `uv sync` succeeds on a clean checkout.
-- `uv run murmurs --version` prints the package version.
+- `uv run otus --version` prints the package version.
 - `uv run pytest`, `uv run ruff check .`, `uv run mypy src` all pass.
 
 ---
@@ -32,12 +32,12 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 **Goal:** the job config from the design doc as validated pydantic models, loaded from YAML.
 
 **Scope**
-- Implement the schema in `docs/design.md` → Configuration in `murmurs.config`, exactly as written. `action` on `EntityType` and `backend` on `TranscriptionConfig` become enums.
+- Implement the schema in `docs/design.md` → Configuration in `otus.config`, exactly as written. `action` on `EntityType` and `backend` on `TranscriptionConfig` become enums.
 - `load_config(path) -> JobConfig` reading YAML.
 - Validation errors name the field path and the problem, without dumping the whole file.
 - Reject configs whose `schema_version` is newer than the code supports.
 - Validate that `stages.start` comes before or equals `stages.end`.
-- A CLI command `murmurs config schema` that prints the JSON Schema.
+- A CLI command `otus config schema` that prints the JSON Schema.
 - `examples/job.yaml`: a complete example config with two entity types (`PERSON` and `LOCATION`).
 
 **Out of scope:** CLI overrides (P1-03), presets.
@@ -53,10 +53,10 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 
 ## P1-03: CLI run command and overrides
 
-**Goal:** `murmurs run` loads a config and applies CLI overrides.
+**Goal:** `otus run` loads a config and applies CLI overrides.
 
 **Scope**
-- `murmurs run --config job.yaml [overrides]`.
+- `otus run --config job.yaml [overrides]`.
 - Named flags for common options: `--input-dir`, `--output-dir`, `--start`, `--end`, `--sample N`, `--no-resume`, `--device`.
 - A generic `--set key.path=value` flag (repeatable) for any other field.
 - Precedence: schema defaults < config file < CLI flags. Overridden config is re-validated.
@@ -75,7 +75,7 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 
 **Goal:** pydantic models for every JSON artifact in the design doc → Data model.
 
-**Scope** (in `murmurs.models`)
+**Scope** (in `otus.models`)
 - `ValidationResult`: file ID, path, format, duration, sample rate, channels, valid flag, error code.
 - `SpeakerTurn`: speaker label, start, end.
 - `Word`: text, start, end, speaker (optional).
@@ -103,7 +103,7 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 
 **Goal:** one place that decides where artifacts live and writes them safely.
 
-**Scope** (in `murmurs.store`)
+**Scope** (in `otus.store`)
 - Output layout: `<output_dir>/<job_id>/manifest.json`, `<output_dir>/<job_id>/files/<file_id>/<stage>.json`, plus `status.json` per file.
 - `file_id` is derived from the input file's content hash, so renaming an input doesn't break resume.
 - Atomic writes (temp file in the same directory, then rename).
@@ -123,9 +123,9 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 
 **Goal:** model-agnostic interfaces so pipeline code never imports a model library.
 
-**Scope** (in `murmurs.backends`)
+**Scope** (in `otus.backends`)
 - Protocols: `AudioLoader`, `Diarizer`, `Transcriber`, `NERDetector`, `LLMClient`.
-- Each protocol's methods take and return types from `murmurs.models` or numpy arrays, never model-library types.
+- Each protocol's methods take and return types from `otus.models` or numpy arrays, never model-library types.
 - Deterministic stubs for each, configurable to fail on a specific file ID (for P1-08 and P1-10 tests).
 - A registry that picks the implementation by name from config (`"stub"` for now).
 
@@ -142,7 +142,7 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 
 **Goal:** structured logs and metrics that cannot leak transcript content.
 
-**Scope** (in `murmurs.logging`)
+**Scope** (in `otus.logging`)
 - JSON-lines logs to `<output_dir>/<job_id>/logs/`, plus human-readable console output.
 - A logging helper that accepts only allowlisted field names (IDs, counts, durations, stage, status, error code). Any other field is rejected.
 - An exception handler that logs the exception type, error code, stage and file ID only, never the message or traceback locals. Full tracebacks go to the log only when an explicit `--debug-unsafe` flag is set, and that flag prints a warning.
@@ -160,7 +160,7 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 
 **Goal:** run a stage range over many files with resume and skip-and-report.
 
-**Scope** (in `murmurs.runner`)
+**Scope** (in `otus.runner`)
 - Stage registry in pipeline order: `ingest`, `load_audio`, `diarize`, `transcribe`, `assign_speakers`, `detect_phi`. In this phase each is a thin stage calling the stub backends.
 - Run `stages.start` through `stages.end` for every input file.
 - Resume: skip a stage for a file if its artifact exists and its recorded input hash and stage config hash match. `--no-resume` reruns everything.
@@ -168,7 +168,7 @@ No real models are used in this phase. Every backend is a stub. Do the tasks in 
 - End-of-job summary: counts of done, failed and skipped files, with failed file IDs and error codes.
 - Process exit code: 0 if all files succeeded, 1 if any failed, 2 for config or setup errors.
 - Sequential execution only. `parallel_workers` is accepted but values above 1 log a notice that parallelism is not yet implemented.
-- Wire the runner into `murmurs run`.
+- Wire the runner into `otus run`.
 
 **Out of scope:** parallel execution, real stage logic.
 

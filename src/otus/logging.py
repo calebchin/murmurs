@@ -29,10 +29,10 @@ from typing import Literal, Protocol, TextIO, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from murmurs.config import Stage
-from murmurs.errors import PipelineError
-from murmurs.models import StageStatus
-from murmurs.store import atomic_writer
+from otus.config import Stage
+from otus.errors import PipelineError
+from otus.models import StageStatus
+from otus.store import atomic_writer
 
 Level = Literal["debug", "info", "warning", "error"]
 
@@ -209,7 +209,7 @@ def install_excepthook(logger: RunLogger) -> None:
 
     def hook(exc_type: type[BaseException], exc: BaseException, tb: TracebackType | None) -> None:
         code = logger.exception(exc.with_traceback(tb), event="crash")
-        logger.console.write(f"murmurs crashed: {exc_type.__name__} ({code}); see logs\n")
+        logger.console.write(f"otus crashed: {exc_type.__name__} ({code}); see logs\n")
 
     sys.excepthook = hook
 

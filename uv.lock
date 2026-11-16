@@ -1164,57 +1164,6 @@ wheels = [
 ]
 
 [[package]]
-name = "murmurs"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "crisperwhisper", extra = ["ct2"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "httpx" },
-    { name = "huggingface-hub" },
-    { name = "librosa", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "librosa", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "torch" },
-    { name = "torchcodec" },
-    { name = "transformers" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "crisperwhisper", extras = ["ct2"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=2.0.3,<2.1" },
-    { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "huggingface-hub", specifier = ">=2.2.0" },
-    { name = "librosa", specifier = ">=0.11,<1.1" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pyyaml", specifier = ">=6" },
-    { name = "torch", specifier = ">=2.11,<2.12" },
-    { name = "torchcodec", specifier = ">=0.17,<0.18" },
-    { name = "transformers", specifier = ">=5.18,<5.20" },
-    { name = "typer", specifier = ">=0.12" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "ruff", specifier = ">=0.6" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
-]
-
-[[package]]
 name = "mypy"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1682,6 +1631,57 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c2/f3/d86c845465a2723ad7e1e5c36dcd75ddb82898b3f53be47ebd429fb2fa5d/nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:4936d1d6780fbe68db454f5e72a42ff64d1fd6397df9f363ae786930fd5c1cd4", size = 148047, upload-time = "2025-09-04T08:29:01.761Z" },
     { url = "https://files.pythonhosted.org/packages/a8/64/3708a90d1ebe202ffdeb7185f878a3c84d15c2b2c31858da2ce0583e2def/nvidia_nvtx-13.0.85-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:cb7780edb6b14107373c835bf8b72e7a178bac7367e23da7acb108f973f157a6", size = 148878, upload-time = "2025-09-04T08:28:53.627Z" },
+]
+
+[[package]]
+name = "otus"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "crisperwhisper", extra = ["ct2"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "librosa", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "librosa", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "torch" },
+    { name = "torchcodec" },
+    { name = "transformers" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crisperwhisper", extras = ["ct2"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=2.0.3,<2.1" },
+    { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "huggingface-hub", specifier = ">=2.2.0" },
+    { name = "librosa", specifier = ">=0.11,<1.1" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "torch", specifier = ">=2.11,<2.12" },
+    { name = "torchcodec", specifier = ">=0.17,<0.18" },
+    { name = "transformers", specifier = ">=5.18,<5.20" },
+    { name = "typer", specifier = ">=0.12" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
 ]
 
 [[package]]

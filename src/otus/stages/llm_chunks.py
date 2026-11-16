@@ -17,7 +17,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
-from murmurs.errors import LLM_INVALID_OUTPUT, LLM_OUTPUT_TRUNCATED, PipelineError
+from otus.errors import LLM_INVALID_OUTPUT, LLM_OUTPUT_TRUNCATED, PipelineError
 
 C = TypeVar("C")
 R = TypeVar("R")

@@ -1,4 +1,4 @@
-"""Command-line interface. A thin wrapper over the ``murmurs`` library."""
+"""Command-line interface. A thin wrapper over the ``otus`` library."""
 
 import json
 import sys
@@ -9,18 +9,18 @@ from typing import Annotated, Any, NoReturn
 import typer
 import yaml
 
-from murmurs import __version__
-from murmurs.backends import registry
-from murmurs.backends.registry import BackendKind, WeightsPlan
-from murmurs.config import (
+from otus import __version__
+from otus.backends import registry
+from otus.backends.registry import BackendKind, WeightsPlan
+from otus.config import (
     PROVISIONAL_ENTITY_TYPES,
     ConfigError,
     JobConfig,
     parse_assignment,
     resolve_config,
 )
-from murmurs.errors import SetupError
-from murmurs.evalimport import (
+from otus.errors import SetupError
+from otus.evalimport import (
     EvalImportError,
     Pairing,
     check_mapping,
@@ -32,22 +32,22 @@ from murmurs.evalimport import (
     select_pairs,
     write_mapping,
 )
-from murmurs.evalset import EvalSetError, label_counts, load_dir
-from murmurs.logging import ProgressBar
-from murmurs.offline import WeightDownloadError, cached_revision, download_weight, enforce_offline
-from murmurs.runner import EXIT_SETUP_ERROR, check_weights, run_job
-from murmurs.store import StoreError, atomic_writer
+from otus.evalset import EvalSetError, label_counts, load_dir
+from otus.logging import ProgressBar
+from otus.offline import WeightDownloadError, cached_revision, download_weight, enforce_offline
+from otus.runner import EXIT_SETUP_ERROR, check_weights, run_job
+from otus.store import StoreError, atomic_writer
 
 EXIT_INTERRUPTED = 130
 """Conventional exit code for Ctrl-C; completed stages are kept for resume."""
 
 app = typer.Typer(
-    name="murmurs",
+    name="otus",
     help="Turn interview audio into speaker-labeled transcripts with proposed redactions.",
     no_args_is_help=True,
     add_completion=False,
     # Rich tracebacks print exception messages and local variables, which can hold
-    # transcript text. Crashes are logged safely by murmurs.logging instead.
+    # transcript text. Crashes are logged safely by otus.logging instead.
     pretty_exceptions_enable=False,
 )
 
@@ -89,7 +89,7 @@ def main(
         ),
     ] = False,
 ) -> None:
-    """Murmurs command-line interface."""
+    """Otus command-line interface."""
 
 
 @app.command()
@@ -373,9 +373,9 @@ def eval_run(
     from datetime import UTC, datetime
     from time import perf_counter
 
-    from murmurs.config import Stage
-    from murmurs.errors import PipelineError
-    from murmurs.evaluate import (
+    from otus.config import Stage
+    from otus.errors import PipelineError
+    from otus.evaluate import (
         SavedDetections,
         detections_path,
         format_type_line,
@@ -386,9 +386,9 @@ def eval_run(
         settings_digest,
         transcript_digest,
     )
-    from murmurs.models import StageStatus
-    from murmurs.stages import stage_config
-    from murmurs.stages.deid import deidentify, render_annotated
+    from otus.models import StageStatus
+    from otus.stages import stage_config
+    from otus.stages.deid import deidentify, render_annotated
 
     enforce_offline()
     try:
@@ -554,7 +554,7 @@ def eval_tags(
 ) -> None:
     """Find the redaction tags reviewers used and add them, blank, to a mapping file.
 
-    Fill in each tag's entity type (or IGNORE), then run `murmurs eval import`. Existing
+    Fill in each tag's entity type (or IGNORE), then run `otus eval import`. Existing
     entries are kept. Prints counts only; the tags are written only to the file.
     """
     types = _entity_type_names(config)
@@ -614,9 +614,7 @@ def eval_import(
     ],
     mapping: Annotated[
         Path,
-        typer.Option(
-            "--tags", "-t", help="Tag mapping from `murmurs eval tags`.", show_default=False
-        ),
+        typer.Option("--tags", "-t", help="Tag mapping from `otus eval tags`.", show_default=False),
     ],
     config: OptionalConfigOption = None,
     only: OnlyOption = None,
@@ -625,7 +623,7 @@ def eval_import(
     """Turn raw and human-deidentified transcripts into an evaluation set.
 
     Writes one *.md interview per pair plus import_report.json (counts only) to OUT_DIR,
-    ready for `murmurs eval check` and `murmurs eval run`. Prints counts and file names
+    ready for `otus eval check` and `otus eval run`. Prints counts and file names
     only. Exit code 0 when the import completes, 2 if it cannot start.
     """
     types = _entity_type_names(config)

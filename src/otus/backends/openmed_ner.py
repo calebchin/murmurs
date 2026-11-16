@@ -17,11 +17,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from murmurs.backends.device import resolve_device
-from murmurs.config import JobConfig
-from murmurs.errors import BackendSetupError, PipelineError
-from murmurs.models import DetectorSource, RedactionSpan
-from murmurs.offline import WeightSpec
+from otus.backends.device import resolve_device
+from otus.config import JobConfig
+from otus.errors import BackendSetupError, PipelineError
+from otus.models import DetectorSource, RedactionSpan
+from otus.offline import WeightSpec
 
 MODEL_ID = "OpenMed/privacy-filter-nemotron-v2"
 WEIGHT_FILES = (
@@ -232,7 +232,7 @@ class OpenMedNER:
 
 
 if TYPE_CHECKING:
-    from murmurs.backends import NERDetector
+    from otus.backends import NERDetector
 
     def _check(config: JobConfig) -> NERDetector:
         # Static proof (checked by mypy) that the detector satisfies its protocol.

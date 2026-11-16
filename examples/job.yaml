@@ -1,10 +1,10 @@
-# Example murmurs job config. Every field is shown; omitted fields take the defaults
-# listed here. Print the full schema with: uv run murmurs config schema
+# Example otus job config. Every field is shown; omitted fields take the defaults
+# listed here. Print the full schema with: uv run otus config schema
 schema_version: 6
 
 data:
   input_dir: /path/to/interview/audio
-  output_dir: /path/to/murmurs/output   # must not be inside input_dir
+  output_dir: /path/to/otus/output   # must not be inside input_dir
   audio_extensions: [".wav", ".m4a", ".mp3"]
 
 sample:
@@ -35,7 +35,7 @@ transcription:
 deid:
   ner_model: OpenMed/privacy-filter-nemotron-v2
   llm_model: openai/gpt-oss-120b
-  llm_server:                   # the local vLLM server (set up by `murmurs models download`)
+  llm_server:                   # the local vLLM server (set up by `otus models download`)
     gpu_memory_utilization: 0.85  # share of GPU memory vLLM may use
     max_model_len: 32768          # longest prompt + response, in tokens
     startup_timeout_s: 900        # give up if the server is not ready by then

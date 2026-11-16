@@ -18,11 +18,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber, registry
-from murmurs.backends.registry import BackendKind
-from murmurs.config import JobConfig, Stage
-from murmurs.errors import BackendSetupError, PipelineError, SetupError
-from murmurs.logging import (
+from otus.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber, registry
+from otus.backends.registry import BackendKind
+from otus.config import JobConfig, Stage
+from otus.errors import BackendSetupError, PipelineError, SetupError
+from otus.logging import (
     FileOutcome,
     LoggerProgress,
     MetricsRecorder,
@@ -31,10 +31,10 @@ from murmurs.logging import (
     RunLogger,
     install_excepthook,
 )
-from murmurs.manifest import finish_manifest, sample_job_id, select_sample, start_manifest
-from murmurs.models import AudioInfo, ErrorInfo, FileStatus, StageStatus, TranscriptMode
-from murmurs.offline import check_cached, check_prepared, enforce_offline
-from murmurs.stages import (
+from otus.manifest import finish_manifest, sample_job_id, select_sample, start_manifest
+from otus.models import AudioInfo, ErrorInfo, FileStatus, StageStatus, TranscriptMode
+from otus.offline import check_cached, check_prepared, enforce_offline
+from otus.stages import (
     DEID_REPORT,
     DEPENDS,
     MISSING_UPSTREAM,
@@ -47,8 +47,8 @@ from murmurs.stages import (
     stage_groups,
     stage_variants,
 )
-from murmurs.stages.deid import deid_mode
-from murmurs.store import ArtifactStore, file_id_from_hash, hash_file
+from otus.stages.deid import deid_mode
+from otus.store import ArtifactStore, file_id_from_hash, hash_file
 
 EXIT_OK = 0
 EXIT_FILES_FAILED = 1
@@ -390,7 +390,7 @@ def run_job(
 
     Hugging Face offline mode is forced for the rest of the process. When ``backends``
     is not given, the weights they need must already be cached
-    (``murmurs models download``); otherwise ``MissingWeightsError`` is raised.
+    (``otus models download``); otherwise ``MissingWeightsError`` is raised.
     """
     enforce_offline()
     modes = parse_modes(config)

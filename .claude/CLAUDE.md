@@ -10,7 +10,7 @@ The data is sensitive participant interview audio. Treat every transcript, promp
 
 ## Hard rules (never break these)
 
-1. **No transcript content in logs.** Logs, exceptions, error messages, progress output and crash reports must never contain transcript text, words, LLM prompts or LLM responses. Log only IDs, counts, durations, stage names and file hashes. Use the logging helpers in `murmurs.logging`; never call `print` or log raw objects that may hold text.
+1. **No transcript content in logs.** Logs, exceptions, error messages, progress output and crash reports must never contain transcript text, words, LLM prompts or LLM responses. Log only IDs, counts, durations, stage names and file hashes. Use the logging helpers in `otus.logging`; never call `print` or log raw objects that may hold text.
 2. **Never modify inputs.** Never write to, move, rename, convert or delete files in the input directory. All outputs go under the configured output directory.
 3. **The original transcript is immutable.** Redactions and edits live in a separate layer; the clean transcript is rendered from original + layer.
 4. **No network calls with interview data.** Everything runs locally. Network access is allowed only for installing packages and downloading model weights. Local processes (such as the vLLM server) are reached only over Unix domain sockets, which stay within the operating system; never over TCP, not even loopback.
@@ -29,17 +29,17 @@ uv run pytest -m gpu             # tests that load real models (only when asked)
 uv run ruff check .              # lint
 uv run ruff format .             # format
 uv run mypy src                  # type check
-uv run murmurs --help             # CLI
+uv run otus --help             # CLI
 ```
 
 Before finishing any task, run `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy src` and `uv run pytest`. All must pass.
 
 ## Code conventions
 
-- Python 3.11+, `src/` layout, package `murmurs`.
+- Python 3.11+, `src/` layout, package `otus`.
 - Pydantic v2 for config and all JSON data models. Data model and config classes are contracts: change them only when a task says so, and bump the relevant `schema_version`.
-- The library (`murmurs`) has no imports from the CLI or GUI layers. The CLI is a thin wrapper.
-- Each model (STT, diarization, NER, LLM) sits behind a `Protocol` in `murmurs.backends`. Pipeline code depends only on the protocol, never on a model library directly.
+- The library (`otus`) has no imports from the CLI or GUI layers. The CLI is a thin wrapper.
+- Each model (STT, diarization, NER, LLM) sits behind a `Protocol` in `otus.backends`. Pipeline code depends only on the protocol, never on a model library directly.
 - Every backend has a stub implementation used by tests. Stubs are deterministic and need no GPU or downloads.
 - Stages read and write artifacts through the artifact store, never through ad hoc paths.
 - All file writes are atomic (write to a temp file in the same directory, then rename). Exception: append-only log files are written line by line, not atomically.
@@ -58,12 +58,12 @@ Before finishing any task, run `uv run ruff check .`, `uv run ruff format --chec
 
 - Transcription uses `crisperwhisper[ct2]` (Linux x86_64 only). Never install `faster-whisper` or upstream `ctranslate2` in the same environment; they overwrite the fork CrisperWhisper depends on.
 - The CrisperWhisper `ct2` model must be loaded and run on a single dedicated thread. Parallelism uses separate processes.
-- CrisperWhisper weights are converted to CTranslate2 format once, by `murmurs models download` (a registry `prepared` step), into `~/.cache/crisperwhisper/murmurs/` (or `$CRISPERWHISPER_CACHE`). Runs load the converted folder and never convert.
+- CrisperWhisper weights are converted to CTranslate2 format once, by `otus models download` (a registry `prepared` step), into `~/.cache/crisperwhisper/otus/` (or `$CRISPERWHISPER_CACHE`). Runs load the converted folder and never convert.
 - Audio decoding uses `torchcodec` with the system `ffmpeg`. Keep the `torch` and `torchcodec` versions compatible (see torchcodec's compatibility table).
-- Diarization uses `nvidia/Nemotron-3-Diarization` through `transformers` (5.18 or later; its feature extractor also needs `librosa`). It is not gated. Gated models (if any are added) need a token: only `murmurs models download` reads it, from the `HF_TOKEN` environment variable; runs load cached weights and never read it. Never hard-code or log the token.
-- The pipeline must run with no network connection. Real backends load weights from the local cache only and import model libraries lazily (inside the factory), never at import time of `murmurs.backends.registry`.
+- Diarization uses `nvidia/Nemotron-3-Diarization` through `transformers` (5.18 or later; its feature extractor also needs `librosa`). It is not gated. Gated models (if any are added) need a token: only `otus models download` reads it, from the `HF_TOKEN` environment variable; runs load cached weights and never read it. Never hard-code or log the token.
+- The pipeline must run with no network connection. Real backends load weights from the local cache only and import model libraries lazily (inside the factory), never at import time of `otus.backends.registry`.
 - NER uses `OpenMed/privacy-filter-nemotron-v2`; LLM uses GPT-OSS 120B. Both run locally.
-- GPT-OSS runs in a vLLM server with its own environment, never installed into the pipeline's: its locked `pyproject.toml`/`uv.lock` ship in `src/murmurs/backends/vllm_server/`, and `murmurs models download` builds it under `~/.cache/murmurs/vllm-server/<lock hash>/` (or `$MURMURS_CACHE`). To change the vLLM version, edit that `pyproject.toml` and run `uv lock --project src/murmurs/backends/vllm_server`. The server listens only on a Unix socket and always runs with the network guard in `vllm_server/guard/sitecustomize.py`; never add a TCP option or remove the guard.
+- GPT-OSS runs in a vLLM server with its own environment, never installed into the pipeline's: its locked `pyproject.toml`/`uv.lock` ship in `src/otus/backends/vllm_server/`, and `otus models download` builds it under `~/.cache/otus/vllm-server/<lock hash>/` (or `$OTUS_CACHE`). To change the vLLM version, edit that `pyproject.toml` and run `uv lock --project src/otus/backends/vllm_server`. The server listens only on a Unix socket and always runs with the network guard in `vllm_server/guard/sitecustomize.py`; never add a TCP option or remove the guard.
 - Do not add new dependencies without saying so in your summary and explaining why.
 
 ## How to work a task

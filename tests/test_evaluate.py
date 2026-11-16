@@ -1,4 +1,4 @@
-"""P3-04 (MVP): basic scoring and ``murmurs eval run``."""
+"""P3-04 (MVP): basic scoring and ``otus eval run``."""
 
 import json
 import re
@@ -12,14 +12,14 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from murmurs.backends import M, registry
-from murmurs.backends.registry import BackendKind
-from murmurs.cli import app
-from murmurs.config import PROVISIONAL_ENTITY_TYPES
-from murmurs.errors import PipelineError
-from murmurs.evalset import load_dir
-from murmurs.evaluate import names_recall, overall, score_set
-from murmurs.models import DetectorSource, LLMUsage, RedactionSpan
+from otus.backends import M, registry
+from otus.backends.registry import BackendKind
+from otus.cli import app
+from otus.config import PROVISIONAL_ENTITY_TYPES
+from otus.errors import PipelineError
+from otus.evalset import load_dir
+from otus.evaluate import names_recall, overall, score_set
+from otus.models import DetectorSource, LLMUsage, RedactionSpan
 
 FIXTURES = Path(__file__).parent / "fixtures" / "eval"
 TYPES = [e.name for e in PROVISIONAL_ENTITY_TYPES]
@@ -259,9 +259,9 @@ def test_eval_run_exits_2_when_models_are_not_set_up(
     hub = tmp_path / "hf" / "hub"
     hub.mkdir(parents=True)
     monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(hub))
-    monkeypatch.setenv("MURMURS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("OTUS_CACHE", str(tmp_path / "cache"))
     path = _config(
         tmp_path, ner_model="OpenMed/privacy-filter-nemotron-v2", llm_model="openai/gpt-oss-120b"
     )
     result = CliRunner().invoke(app, ["eval", "run", str(FIXTURES), "-c", str(path)])
-    assert result.exit_code == 2 and "murmurs models download" in result.stderr
+    assert result.exit_code == 2 and "otus models download" in result.stderr

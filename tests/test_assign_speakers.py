@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 from conftest import SENTINEL, StubJob
 
-from murmurs.backends.stubs import (
+from otus.backends.stubs import (
     StubAudioLoader,
     StubDiarizer,
     StubLLMClient,
     StubNERDetector,
     StubTranscriber,
 )
-from murmurs.config import JobConfig, Stage, load_config
-from murmurs.models import (
+from otus.config import JobConfig, Stage, load_config
+from otus.models import (
     UNKNOWN_SPEAKER,
     Segment,
     SpeakerTurn,
@@ -24,10 +24,10 @@ from murmurs.models import (
     TranscriptMode,
     Word,
 )
-from murmurs.runner import run_job
-from murmurs.stages import Backends
-from murmurs.stages.assign import assign_speakers, shift_turns
-from murmurs.store import ArtifactStore, transcript_to_text
+from otus.runner import run_job
+from otus.stages import Backends
+from otus.stages.assign import assign_speakers, shift_turns
+from otus.store import ArtifactStore, transcript_to_text
 
 A, B = "SPEAKER_00", "SPEAKER_01"
 TOL = 0.5

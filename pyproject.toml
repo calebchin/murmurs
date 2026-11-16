@@ -1,5 +1,5 @@
 [project]
-name = "murmurs"
+name = "otus"
 version = "0.1.0"
 description = "Local pipeline that turns interview audio into speaker-labeled transcripts with proposed deidentification redactions"
 readme = "README.md"
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-murmurs = "murmurs.cli:app"
+otus = "otus.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.13.3,<0.14.0"]

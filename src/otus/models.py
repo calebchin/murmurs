@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-from murmurs.config import JobConfig, Stage
+from otus.config import JobConfig, Stage
 
 TIME_TOLERANCE_S = 1e-6
 """Slack allowed when checking that a word lies inside its segment (float rounding)."""

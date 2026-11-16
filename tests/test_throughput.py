@@ -6,9 +6,9 @@ import json
 import pytest
 from conftest import StubJob
 
-from murmurs.config import Stage, load_config
-from murmurs.runner import run_job
-from murmurs.store import ArtifactStore
+from otus.config import Stage, load_config
+from otus.runner import run_job
+from otus.store import ArtifactStore
 
 
 def test_summary_reports_audio_wall_time_and_real_time_factor(stub_job: StubJob) -> None:

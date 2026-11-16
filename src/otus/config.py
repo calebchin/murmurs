@@ -320,8 +320,8 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     if version > CURRENT_SCHEMA_VERSION:
         raise ConfigError(
             [
-                f"schema_version: version {version} is newer than this version of murmurs "
-                f"supports (up to {CURRENT_SCHEMA_VERSION}); upgrade murmurs"
+                f"schema_version: version {version} is newer than this version of otus "
+                f"supports (up to {CURRENT_SCHEMA_VERSION}); upgrade otus"
             ]
         )
     # 1 -> 2 added diarization.speaker_gap_tolerance_s, which has a default.

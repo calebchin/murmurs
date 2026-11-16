@@ -9,7 +9,7 @@ from __future__ import annotations
 from bisect import bisect_left
 from collections.abc import Sequence
 
-from murmurs.models import UNKNOWN_SPEAKER, Segment, SpeakerTurn, Transcript, Word
+from otus.models import UNKNOWN_SPEAKER, Segment, SpeakerTurn, Transcript, Word
 
 
 class _Turns:

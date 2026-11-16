@@ -1,7 +1,7 @@
 """Transcription with CrisperWhisper 2.0 on its CTranslate2 (``ct2``) backend.
 
 Weights are downloaded in Hugging Face format and converted to CTranslate2 format once,
-by ``murmurs models download`` (D17). Runs load the converted folder directly, so
+by ``otus models download`` (D17). Runs load the converted folder directly, so
 CrisperWhisper never looks at the Hugging Face cache or the network.
 
 The ct2 model must be loaded and run on one thread, so the transcriber owns a
@@ -28,12 +28,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from murmurs.backends import Waveform
-from murmurs.backends.device import resolve_device
-from murmurs.config import JobConfig
-from murmurs.errors import BackendSetupError, PipelineError
-from murmurs.models import Segment, Transcript, TranscriptMode, Word
-from murmurs.offline import PreparedModel, WeightSpec, cached_snapshot
+from otus.backends import Waveform
+from otus.backends.device import resolve_device
+from otus.config import JobConfig
+from otus.errors import BackendSetupError, PipelineError
+from otus.models import Segment, Transcript, TranscriptMode, Word
+from otus.offline import PreparedModel, WeightSpec, cached_snapshot
 
 MODEL_ID = "nyralabs/CrisperWhisper2.0_large"
 WEIGHT_PATTERNS = ("*.json", "*.txt", "*.safetensors")
@@ -49,7 +49,7 @@ SAMPLE_RATE = 16_000
 STORED_PRECISION = "float16"
 """Precision of the converted model on disk. On CPU it runs as float32 (CTranslate2
 converts at load time)."""
-READY_MARKER = ".murmurs_ready"
+READY_MARKER = ".otus_ready"
 """Written last into a converted folder, so a half-finished conversion never counts."""
 
 SENTENCE_END = (".", "?", "!")
@@ -104,7 +104,7 @@ def _cache_root() -> Path:
 def converted_dir(revision: str, model_id: str = MODEL_ID) -> Path:
     """Where the converted model for a given weights revision lives."""
     slug = model_id.replace("/", "--")
-    return _cache_root() / "murmurs" / f"{slug}--{revision}--{STORED_PRECISION}"
+    return _cache_root() / "otus" / f"{slug}--{revision}--{STORED_PRECISION}"
 
 
 def _is_ready(folder: Path) -> bool:
@@ -147,7 +147,7 @@ def crisperwhisper_weights(config: JobConfig) -> Sequence[WeightSpec]:
 
 
 def crisperwhisper_prepared(config: JobConfig) -> Sequence[PreparedModel]:
-    """The CTranslate2 conversions that ``murmurs models download`` runs after
+    """The CTranslate2 conversions that ``otus models download`` runs after
     downloading: the model, and the draft model if speculative decoding is on."""
     return [
         PreparedModel(
@@ -332,7 +332,7 @@ def create_crisperwhisper(config: JobConfig) -> CrisperWhisperTranscriber:
     snapshot = cached_snapshot(SPEC)
     if snapshot is None or not _is_ready(converted_dir(snapshot.name)):
         raise BackendSetupError(
-            f"{MODEL_ID} is not downloaded and converted; run `murmurs models download`"
+            f"{MODEL_ID} is not downloaded and converted; run `otus models download`"
         )
     draft = None
     if config.transcription.draft_model is not None:
@@ -340,7 +340,7 @@ def create_crisperwhisper(config: JobConfig) -> CrisperWhisperTranscriber:
         draft_snapshot = cached_snapshot(_spec(draft_id))
         if draft_snapshot is None or not _is_ready(converted_dir(draft_snapshot.name, draft_id)):
             raise BackendSetupError(
-                f"{draft_id} is not downloaded and converted; run `murmurs models download`"
+                f"{draft_id} is not downloaded and converted; run `otus models download`"
             )
         draft = (converted_dir(draft_snapshot.name, draft_id), draft_snapshot.name)
     return CrisperWhisperTranscriber(
@@ -349,7 +349,7 @@ def create_crisperwhisper(config: JobConfig) -> CrisperWhisperTranscriber:
 
 
 if TYPE_CHECKING:
-    from murmurs.backends import Transcriber
+    from otus.backends import Transcriber
 
     def _check(config: JobConfig) -> Transcriber:
         # Static proof (checked by mypy) that the transcriber satisfies its protocol.

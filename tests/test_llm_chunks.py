@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from murmurs.errors import LLM_INVALID_OUTPUT, LLM_OUTPUT_TRUNCATED, PipelineError
-from murmurs.stages.llm_chunks import halves, run_chunks
+from otus.errors import LLM_INVALID_OUTPUT, LLM_OUTPUT_TRUNCATED, PipelineError
+from otus.stages.llm_chunks import halves, run_chunks
 
 Chunk = tuple[int, ...]
 

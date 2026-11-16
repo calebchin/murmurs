@@ -13,8 +13,8 @@ case, spacing and brackets.
 Each pair is aligned token by token. Where tags replace raw tokens, the raw tokens become
 a ground-truth label of the tag's type. Bracketed notes that both copies share, such as
 ``[inaudible]``, are ordinary text. The output is one interview per pair in the
-evaluation-set format (``murmurs.evalset``) with ``SPEAKER_NN`` turns, ready for
-``murmurs eval check`` and ``murmurs eval run``. The interview type comes from the file
+evaluation-set format (``otus.evalset``) with ``SPEAKER_NN`` turns, ready for
+``otus eval check`` and ``otus eval run``. The interview type comes from the file
 name, which must contain ``CECA`` or ``LEDS``.
 
 Nothing here prints, logs or raises transcript text or tag wording (tags are written by
@@ -35,8 +35,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-from murmurs.models import InterviewType
-from murmurs.store import atomic_writer
+from otus.models import InterviewType
+from otus.store import atomic_writer
 
 IGNORE = "IGNORE"
 """Mapping value for tags that do not mark PHI (they produce no label)."""
@@ -257,10 +257,10 @@ def write_mapping(
     occurrence count. Returns the number of new tags."""
     keys = sorted(set(existing) | set(tags), key=lambda k: (-tags[k], k))
     lines = [
-        "# Tag mapping for `murmurs eval import`. Give each tag the entity type it marks,",
+        "# Tag mapping for `otus eval import`. Give each tag the entity type it marks,",
         f"# or {IGNORE} if it is not PHI. Entity types: {', '.join(entity_types)}.",
         "# Tags match ignoring case, spacing and brackets. Counts are occurrences found by",
-        "# `murmurs eval tags`. This file lists reviewer tags: keep it with the data.",
+        "# `otus eval tags`. This file lists reviewer tags: keep it with the data.",
     ]
     for key in keys:
         entry = yaml.safe_dump({key: existing.get(key) or ""}, allow_unicode=True, width=1000)
@@ -431,7 +431,7 @@ def _render(
         "---",
         f"interview_type: {kind.value}",
         "---",
-        "# Imported by `murmurs eval import` from a raw and a human-deidentified transcript.",
+        "# Imported by `otus eval import` from a raw and a human-deidentified transcript.",
     ]
     for index, turn in enumerate(turns):
         pieces, pos = [], 0
@@ -483,7 +483,7 @@ def import_pairs(
     if unmapped:
         raise EvalImportError(
             f"{len(unmapped)} tags have no entity type in the mapping; "
-            "run `murmurs eval tags` to add them, then fill them in"
+            "run `otus eval tags` to add them, then fill them in"
         )
 
     reports = []

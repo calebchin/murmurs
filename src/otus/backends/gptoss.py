@@ -1,6 +1,6 @@
 """GPT-OSS 120B through a local vLLM server, reached only over a Unix socket (D6, D22).
 
-The server runs from its own environment (built by ``murmurs models download``) in its
+The server runs from its own environment (built by ``otus models download``) in its
 own process group. It listens on a Unix socket in a private temporary folder and runs
 with a network guard that refuses every non-Unix connection, so prompts and responses
 never leave the operating system. Its stdout and stderr are discarded, since vLLM can
@@ -29,16 +29,16 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from murmurs.backends import M
-from murmurs.config import JobConfig, LLMServerConfig
-from murmurs.errors import (
+from otus.backends import M
+from otus.config import JobConfig, LLMServerConfig
+from otus.errors import (
     LLM_INVALID_OUTPUT,
     LLM_OUTPUT_TRUNCATED,
     BackendSetupError,
     PipelineError,
 )
-from murmurs.models import LLMUsage
-from murmurs.offline import OFFLINE_ENV, PreparedModel, WeightSpec, cached_snapshot
+from otus.models import LLMUsage
+from otus.offline import OFFLINE_ENV, PreparedModel, WeightSpec, cached_snapshot
 
 MODEL_ID = "openai/gpt-oss-120b"
 WEIGHT_PATTERNS = (
@@ -57,7 +57,7 @@ SPEC = WeightSpec(MODEL_ID, allow_patterns=WEIGHT_PATTERNS)
 VLLM_VERSION = "0.31.0"
 """The vLLM version pinned in ``vllm_server/pyproject.toml`` and its lock."""
 SERVER_FILES = Path(__file__).parent / "vllm_server"
-"""Ships with murmurs: the server environment's pyproject.toml and uv.lock, and the guard."""
+"""Ships with otus: the server environment's pyproject.toml and uv.lock, and the guard."""
 GUARD_DIR = SERVER_FILES / "guard"
 
 TIKTOKEN_FILE = "o200k_base.tiktoken"
@@ -66,8 +66,8 @@ TIKTOKEN_SHA256 = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1
 """GPT-OSS's tokenizer vocabulary. vLLM's harmony encoding would download it on first
 use; with ``TIKTOKEN_ENCODINGS_BASE`` set it reads this local copy and checks this hash."""
 
-ENV_READY = ".murmurs_ready"
-WARM_READY = ".murmurs_warm"
+ENV_READY = ".otus_ready"
+WARM_READY = ".otus_warm"
 MAX_SOCKET_PATH = 100
 """Unix socket paths are limited to about 108 bytes; stay below with some margin."""
 STOP_GRACE_S = (30.0, 15.0, 5.0)
@@ -81,8 +81,8 @@ LLM_REQUEST_FAILED = "LLM_REQUEST_FAILED"
 
 
 def cache_root() -> Path:
-    """murmurs' own cache (``$MURMURS_CACHE``, default ``~/.cache/murmurs``)."""
-    return Path(os.environ.get("MURMURS_CACHE", Path.home() / ".cache" / "murmurs"))
+    """otus' own cache (``$OTUS_CACHE``, default ``~/.cache/otus``)."""
+    return Path(os.environ.get("OTUS_CACHE", Path.home() / ".cache" / "otus"))
 
 
 def server_lock_hash() -> str:
@@ -108,7 +108,7 @@ def tiktoken_dir() -> Path:
     return cache_root() / "tiktoken"
 
 
-# --- one-time setup, run by `murmurs models download` (D22) ------------------------------
+# --- one-time setup, run by `otus models download` (D22) ------------------------------
 
 
 def env_is_ready() -> bool:
@@ -251,7 +251,7 @@ _running: weakref.WeakSet[LLMServer] = weakref.WeakSet()
 
 @atexit.register
 def _stop_leftover_servers() -> None:
-    """Safety net: never leave a server holding the GPU after murmurs exits."""
+    """Safety net: never leave a server holding the GPU after otus exits."""
     for server in list(_running):
         server.stop()
 
@@ -261,7 +261,7 @@ def _socket_dir() -> Path:
     base = tempfile.gettempdir()
     if len(base) > MAX_SOCKET_PATH - 30:
         base = "/tmp"
-    return Path(tempfile.mkdtemp(prefix="murmurs-vllm-", dir=base))
+    return Path(tempfile.mkdtemp(prefix="otus-vllm-", dir=base))
 
 
 class LLMServer:
@@ -554,9 +554,9 @@ def start_gpt_oss(settings: LLMServerConfig) -> GptOssLLM:
     """
     snapshot = cached_snapshot(SPEC)
     if snapshot is None:
-        raise BackendSetupError(f"{MODEL_ID} weights are not cached; run `murmurs models download`")
+        raise BackendSetupError(f"{MODEL_ID} weights are not cached; run `otus models download`")
     if not env_is_ready() or not tiktoken_is_ready():
-        raise BackendSetupError("the LLM server is not set up; run `murmurs models download`")
+        raise BackendSetupError("the LLM server is not set up; run `otus models download`")
     command = server_command(vllm_executable(), snapshot, Path("{socket}"), settings)
     env = server_environment(os.environ, vllm_executable().parent, tiktoken_dir())
     server = LLMServer.start(command, env)
@@ -579,7 +579,7 @@ def create_gpt_oss(config: JobConfig) -> GptOssLLM:
 
 
 if TYPE_CHECKING:
-    from murmurs.backends import LLMClient
+    from otus.backends import LLMClient
 
     def _check(config: JobConfig) -> LLMClient:
         # Static proof (checked by mypy) that the backend satisfies its protocol.

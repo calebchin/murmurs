@@ -1318,17 +1318,6 @@ wheels = [
 ]
 
 [[package]]
-name = "murmurs-vllm-server"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "vllm" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "vllm", specifier = "==0.31.0" }]
-
-[[package]]
 name = "nccl-extensions"
 version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2017,6 +2006,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/03/33/2917125287b46255cfc6d7e0bc4bc5e5c90f7ad4e02d3922c2f0f95b696b/oss_harmony-0.0.11-cp38-abi3-win32.whl", hash = "sha256:fd91609eef825f342ae7ac990651cfebcf28aac6b6ad1186bf37c5b593cdf950", size = 3135714, upload-time = "2026-05-13T20:49:15.924Z" },
     { url = "https://files.pythonhosted.org/packages/c8/c9/eedd8d02be8bbaa586f8a323de2fc976e6053582411020b7be1f7c7e1734/oss_harmony-0.0.11-cp38-abi3-win_amd64.whl", hash = "sha256:4db175b6f6264cd60ceb692c0e686937e072ca6ea1239d0d4cace2cfb50f4974", size = 3266750, upload-time = "2026-05-13T20:49:13.404Z" },
 ]
+
+[[package]]
+name = "otus-vllm-server"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "vllm" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "vllm", specifier = "==0.31.0" }]
 
 [[package]]
 name = "outlines-core"

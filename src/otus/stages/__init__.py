@@ -1,7 +1,7 @@
 """Pipeline stages.
 
 Each stage reads its inputs and writes its artifacts through the artifact store, and
-calls models only through ``murmurs.backends`` protocols. ``detect_phi`` is a phase 1
+calls models only through ``otus.backends`` protocols. ``detect_phi`` is a phase 1
 placeholder, replaced in phase 3.
 """
 
@@ -14,24 +14,24 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from murmurs.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber, Waveform
-from murmurs.config import JobConfig, Stage
-from murmurs.errors import PipelineError
-from murmurs.models import (
+from otus.backends import AudioLoader, Diarizer, LLMClient, NERDetector, Transcriber, Waveform
+from otus.config import JobConfig, Stage
+from otus.errors import PipelineError
+from otus.models import (
     AudioInfo,
     Diarization,
     SpeakerCorrection,
     Transcript,
     TranscriptMode,
 )
-from murmurs.stages import correction as _correction
-from murmurs.stages import deid as _deid
-from murmurs.stages.assign import assign_speakers as assign_words
-from murmurs.stages.assign import shift_turns
-from murmurs.stages.correction import correct_modes, prompt_hash
-from murmurs.stages.deid import deid_mode, deidentify, render_annotated, render_clean
-from murmurs.stages.deid import prompt_hash as deid_prompt_hash
-from murmurs.store import ArtifactStore
+from otus.stages import correction as _correction
+from otus.stages import deid as _deid
+from otus.stages.assign import assign_speakers as assign_words
+from otus.stages.assign import shift_turns
+from otus.stages.correction import correct_modes, prompt_hash
+from otus.stages.deid import deid_mode, deidentify, render_annotated, render_clean
+from otus.stages.deid import prompt_hash as deid_prompt_hash
+from otus.store import ArtifactStore
 
 M = TypeVar("M", bound=BaseModel)
 B = TypeVar("B")
